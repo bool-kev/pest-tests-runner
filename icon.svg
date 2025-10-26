@@ -1,0 +1,35 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background circle -->
+  <circle cx="64" cy="64" r="60" fill="#4CAF50"/>
+  
+  <!-- Bug/Pest icon (main) -->
+  <ellipse cx="64" cy="70" rx="35" ry="40" fill="#2E7D32"/>
+  
+  <!-- Bug head -->
+  <circle cx="64" cy="45" r="18" fill="#2E7D32"/>
+  
+  <!-- Eyes -->
+  <circle cx="58" cy="43" r="4" fill="#FFF"/>
+  <circle cx="70" cy="43" r="4" fill="#FFF"/>
+  <circle cx="58" cy="43" r="2" fill="#000"/>
+  <circle cx="70" cy="43" r="2" fill="#000"/>
+  
+  <!-- Antennae -->
+  <line x1="56" y1="35" x2="50" y2="25" stroke="#2E7D32" stroke-width="3" stroke-linecap="round"/>
+  <line x1="72" y1="35" x2="78" y2="25" stroke="#2E7D32" stroke-width="3" stroke-linecap="round"/>
+  <circle cx="50" cy="25" r="3" fill="#2E7D32"/>
+  <circle cx="78" cy="25" r="3" fill="#2E7D32"/>
+  
+  <!-- Legs -->
+  <line x1="40" y1="65" x2="25" y2="55" stroke="#2E7D32" stroke-width="3" stroke-linecap="round"/>
+  <line x1="40" y1="75" x2="25" y2="75" stroke="#2E7D32" stroke-width="3" stroke-linecap="round"/>
+  <line x1="40" y1="85" x2="25" y2="95" stroke="#2E7D32" stroke-width="3" stroke-linecap="round"/>
+  
+  <line x1="88" y1="65" x2="103" y2="55" stroke="#2E7D32" stroke-width="3" stroke-linecap="round"/>
+  <line x1="88" y1="75" x2="103" y2="75" stroke="#2E7D32" stroke-width="3" stroke-linecap="round"/>
+  <line x1="88" y1="85" x2="103" y2="95" stroke="#2E7D32" stroke-width="3" stroke-linecap="round"/>
+  
+  <!-- Play button overlay -->
+  <circle cx="90" cy="90" r="20" fill="#FF5722"/>
+  <polygon points="85,85 85,95 95,90" fill="#FFF"/>
+</svg>

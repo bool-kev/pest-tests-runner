@@ -13,3 +13,9 @@ vsc-extension-quickstart.md
 **/*.ts
 **/.vscode-test.*
 !examples/**
+docs/**
+build/**
+icon.svg
+todo.md
+build.sh
+CHANGELOG.md

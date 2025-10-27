@@ -1,8 +1,8 @@
 {
-  "name": "pest-runner-icons",
-  "displayName": "Pest Runner Icons",
-  "description": "Add CodeLens icons to run Pest Laravel tests",
-  "version": "0.0.2",
+  "name": "pest-tests-runner",
+  "displayName": "Pest Tests Runner",
+  "description": "Elegant Pest PHP testing framework runner with inline status indicators, CodeLens actions, and real-time colored test results directly in your editor",
+  "version": "0.1.6",
   "publisher": "dark-shadow",
   "author": {
     "name": "dark SHADOW",
@@ -10,17 +10,27 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/bool-kev/pest-runner-icons"
+    "url": "https://github.com/bool-kev/pest-tests-runner"
   },
   "bugs": {
-    "url": "https://github.com/bool-kev/pest-runner-icons/issues"
+    "url": "https://github.com/bool-kev/pest-tests-runner/issues"
   },
-  "homepage": "https://github.com/bool-kev/pest-runner-icons#readme",
+  "homepage": "https://github.com/bool-kev/pest-tests-runner#readme",
   "engines": {
-    "vscode": "^1.105.0"
+    "vscode": "^1.75.0"
   },
   "categories": [
     "Testing"
+  ],
+  "keywords": [
+    "pest",
+    "php",
+    "testing",
+    "test runner",
+    "laravel",
+    "phpunit",
+    "codelens",
+    "tdd"
   ],
   "icon": "icon.png",
   "activationEvents": [
@@ -30,38 +40,63 @@
   "contributes": {
     "commands": [
       {
-        "command": "pest-runner-icons.runTest",
-        "title": "Run Test",
+        "command": "pest-tests-runner.runTest",
+        "title": "Pest Tests Runner: Run Test",
         "icon": "$(play)"
       },
       {
-        "command": "pest-runner-icons.runTestFile",
-        "title": "Run Test File",
+        "command": "pest-tests-runner.runTestFile",
+        "title": "Pest Tests Runner: Run Test File",
         "icon": "$(run-all)"
       },
       {
-        "command": "pest-runner-icons.runTestSuite",
-        "title": "Run Test Suite",
+        "command": "pest-tests-runner.runTestSuite",
+        "title": "Pest Tests Runner: Run Test Suite",
         "icon": "$(run-all)"
       },
       {
-        "command": "pest-runner-icons.runDescribeGroup",
-        "title": "Run Describe Group",
+        "command": "pest-tests-runner.runDescribeGroup",
+        "title": "Pest Tests Runner: Run Describe Group",
         "icon": "$(run-all)"
       }
     ],
     "configuration": {
-      "title": "Pest Runner Icons",
+      "title": "Pest Tests Runner",
       "properties": {
-        "pest-runner-icons.enableCodeLens": {
+        "pest-tests-runner.enableCodeLens": {
           "type": "boolean",
           "default": true,
-          "description": "Enable CodeLens for Pest tests"
+          "description": "Enable CodeLens for Pest tests with status indicators"
         },
-        "pest-runner-icons.useBetterPest": {
+        "pest-tests-runner.pestBinaryPath": {
+          "type": "string",
+          "default": "",
+          "description": "Custom path to Pest binary (leave empty for auto-detection). Example: './vendor/bin/pest' or 'php vendor/pestphp/pest/bin/pest'"
+        },
+        "pest-tests-runner.showTerminal": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show terminal when running tests (default: false, results are shown in Output channel)"
+        },
+        "pest-tests-runner.focusOutputOnRun": {
           "type": "boolean",
           "default": true,
-          "description": "Use Better Pest commands instead of built-in commands"
+          "description": "Automatically focus the Output channel when running tests"
+        },
+        "pest-tests-runner.debugMode": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable debug logging (shows detailed execution information)"
+        },
+        "pest-tests-runner.autoSaveBeforeRun": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically save the current file before running tests"
+        },
+        "pest-tests-runner.showInlineResults": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show colored test results inline in the editor (✅ passed, ❌ failed, 🟡 skipped)"
         }
       }
     }
@@ -81,16 +116,19 @@
     "test": "vscode-test"
   },
   "devDependencies": {
-    "@types/vscode": "^1.105.0",
     "@types/mocha": "^10.0.10",
     "@types/node": "22.x",
+    "@types/vscode": "1.75.0",
     "@typescript-eslint/eslint-plugin": "^8.45.0",
     "@typescript-eslint/parser": "^8.45.0",
-    "eslint": "^9.36.0",
-    "esbuild": "^0.25.10",
-    "npm-run-all": "^4.1.5",
-    "typescript": "^5.9.3",
     "@vscode/test-cli": "^0.0.11",
-    "@vscode/test-electron": "^2.5.2"
+    "@vscode/test-electron": "^2.5.2",
+    "esbuild": "^0.25.10",
+    "eslint": "^9.36.0",
+    "npm-run-all": "^4.1.5",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "fast-xml-parser": "^5.3.0"
   }
 }

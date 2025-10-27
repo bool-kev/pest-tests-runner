@@ -1,35 +1,80 @@
-<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
-  <!-- Background circle -->
-  <circle cx="64" cy="64" r="60" fill="#4CAF50"/>
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg"><svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+
+  <!-- Background circle with Pest dark color -->  <!-- Background circle -->
+
+  <circle cx="64" cy="64" r="60" fill="#0E0E0E"/>  <circle cx="64" cy="64" r="60" fill="#4CAF50"/>
+
+    
+
+  <!-- Pest bug icon in official lime green -->  <!-- Bug/Pest icon (main) -->
+
+  <g transform="translate(64, 64)">  <ellipse cx="64" cy="70" rx="35" ry="40" fill="#2E7D32"/>
+
+    <!-- Bug body -->  
+
+    <ellipse cx="0" cy="0" rx="20" ry="28" fill="#A4F287"/>  <!-- Bug head -->
+
+      <circle cx="64" cy="45" r="18" fill="#2E7D32"/>
+
+    <!-- Bug head -->  
+
+    <circle cx="0" cy="-25" r="14" fill="#A4F287"/>  <!-- Eyes -->
+
+      <circle cx="58" cy="43" r="4" fill="#FFF"/>
+
+    <!-- Antennae -->  <circle cx="70" cy="43" r="4" fill="#FFF"/>
+
+    <line x1="-8" y1="-32" x2="-14" y2="-42" stroke="#A4F287" stroke-width="2.5" stroke-linecap="round"/>  <circle cx="58" cy="43" r="2" fill="#000"/>
+
+    <line x1="8" y1="-32" x2="14" y2="-42" stroke="#A4F287" stroke-width="2.5" stroke-linecap="round"/>  <circle cx="70" cy="43" r="2" fill="#000"/>
+
+    <circle cx="-14" cy="-42" r="2.5" fill="#A4F287"/>  
+
+    <circle cx="14" cy="-42" r="2.5" fill="#A4F287"/>  <!-- Antennae -->
+
+      <line x1="56" y1="35" x2="50" y2="25" stroke="#2E7D32" stroke-width="3" stroke-linecap="round"/>
+
+    <!-- Eyes -->  <line x1="72" y1="35" x2="78" y2="25" stroke="#2E7D32" stroke-width="3" stroke-linecap="round"/>
+
+    <circle cx="-5" cy="-26" r="2.5" fill="#0E0E0E"/>  <circle cx="50" cy="25" r="3" fill="#2E7D32"/>
+
+    <circle cx="5" cy="-26" r="2.5" fill="#0E0E0E"/>  <circle cx="78" cy="25" r="3" fill="#2E7D32"/>
+
+      
+
+    <!-- Legs (left side) -->  <!-- Legs -->
+
+    <path d="M -18 -5 Q -28 -8 -32 -2" stroke="#A4F287" stroke-width="2.5" fill="none" stroke-linecap="round"/>  <line x1="40" y1="65" x2="25" y2="55" stroke="#2E7D32" stroke-width="3" stroke-linecap="round"/>
+
+    <path d="M -18 5 Q -30 5 -34 10" stroke="#A4F287" stroke-width="2.5" fill="none" stroke-linecap="round"/>  <line x1="40" y1="75" x2="25" y2="75" stroke="#2E7D32" stroke-width="3" stroke-linecap="round"/>
+
+    <path d="M -18 15 Q -28 18 -32 24" stroke="#A4F287" stroke-width="2.5" fill="none" stroke-linecap="round"/>  <line x1="40" y1="85" x2="25" y2="95" stroke="#2E7D32" stroke-width="3" stroke-linecap="round"/>
+
+      
+
+    <!-- Legs (right side) -->  <line x1="88" y1="65" x2="103" y2="55" stroke="#2E7D32" stroke-width="3" stroke-linecap="round"/>
+
+    <path d="M 18 -5 Q 28 -8 32 -2" stroke="#A4F287" stroke-width="2.5" fill="none" stroke-linecap="round"/>  <line x1="88" y1="75" x2="103" y2="75" stroke="#2E7D32" stroke-width="3" stroke-linecap="round"/>
+
+    <path d="M 18 5 Q 30 5 34 10" stroke="#A4F287" stroke-width="2.5" fill="none" stroke-linecap="round"/>  <line x1="88" y1="85" x2="103" y2="95" stroke="#2E7D32" stroke-width="3" stroke-linecap="round"/>
+
+    <path d="M 18 15 Q 28 18 32 24" stroke="#A4F287" stroke-width="2.5" fill="none" stroke-linecap="round"/>  
+
+      <!-- Play button overlay -->
+
+    <!-- Body segments/details -->  <circle cx="90" cy="90" r="20" fill="#FF5722"/>
+
+    <line x1="-15" y1="-8" x2="15" y2="-8" stroke="#0E0E0E" stroke-width="1.5" opacity="0.3"/>  <polygon points="85,85 85,95 95,90" fill="#FFF"/>
+
+    <line x1="-16" y1="0" x2="16" y2="0" stroke="#0E0E0E" stroke-width="1.5" opacity="0.3"/></svg>
+
+    <line x1="-16" y1="8" x2="16" y2="8" stroke="#0E0E0E" stroke-width="1.5" opacity="0.3"/>
+    
+    <!-- Play button overlay (testing/run symbol) -->
+    <circle cx="22" cy="22" r="11" fill="#10B981"/>
+    <path d="M 19 18 L 19 26 L 27 22 Z" fill="white"/>
+  </g>
   
-  <!-- Bug/Pest icon (main) -->
-  <ellipse cx="64" cy="70" rx="35" ry="40" fill="#2E7D32"/>
-  
-  <!-- Bug head -->
-  <circle cx="64" cy="45" r="18" fill="#2E7D32"/>
-  
-  <!-- Eyes -->
-  <circle cx="58" cy="43" r="4" fill="#FFF"/>
-  <circle cx="70" cy="43" r="4" fill="#FFF"/>
-  <circle cx="58" cy="43" r="2" fill="#000"/>
-  <circle cx="70" cy="43" r="2" fill="#000"/>
-  
-  <!-- Antennae -->
-  <line x1="56" y1="35" x2="50" y2="25" stroke="#2E7D32" stroke-width="3" stroke-linecap="round"/>
-  <line x1="72" y1="35" x2="78" y2="25" stroke="#2E7D32" stroke-width="3" stroke-linecap="round"/>
-  <circle cx="50" cy="25" r="3" fill="#2E7D32"/>
-  <circle cx="78" cy="25" r="3" fill="#2E7D32"/>
-  
-  <!-- Legs -->
-  <line x1="40" y1="65" x2="25" y2="55" stroke="#2E7D32" stroke-width="3" stroke-linecap="round"/>
-  <line x1="40" y1="75" x2="25" y2="75" stroke="#2E7D32" stroke-width="3" stroke-linecap="round"/>
-  <line x1="40" y1="85" x2="25" y2="95" stroke="#2E7D32" stroke-width="3" stroke-linecap="round"/>
-  
-  <line x1="88" y1="65" x2="103" y2="55" stroke="#2E7D32" stroke-width="3" stroke-linecap="round"/>
-  <line x1="88" y1="75" x2="103" y2="75" stroke="#2E7D32" stroke-width="3" stroke-linecap="round"/>
-  <line x1="88" y1="85" x2="103" y2="95" stroke="#2E7D32" stroke-width="3" stroke-linecap="round"/>
-  
-  <!-- Play button overlay -->
-  <circle cx="90" cy="90" r="20" fill="#FF5722"/>
-  <polygon points="85,85 85,95 95,90" fill="#FFF"/>
+  <!-- Outer ring for visual polish -->
+  <circle cx="64" cy="64" r="60" fill="none" stroke="#A4F287" stroke-width="2" opacity="0.4"/>
 </svg>

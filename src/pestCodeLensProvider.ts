@@ -1,27 +1,24 @@
 import * as vscode from 'vscode';
+import { TestResultsManager } from './testResultsManager';
 
 export class PestCodeLensProvider implements vscode.CodeLensProvider {
 	private _onDidChangeCodeLenses: vscode.EventEmitter<void> = new vscode.EventEmitter<void>();
 	public readonly onDidChangeCodeLenses: vscode.Event<void> = this._onDidChangeCodeLenses.event;
 
-	constructor() {
-		vscode.workspace.onDidChangeConfiguration(() => {
-			this._onDidChangeCodeLenses.fire();
-		});
+	constructor(private testResultsManager: TestResultsManager) {
+		vscode.workspace.onDidChangeConfiguration(() => this._onDidChangeCodeLenses.fire());
 	}
 
-	public provideCodeLenses(
-		document: vscode.TextDocument,
-		token: vscode.CancellationToken
-	): vscode.CodeLens[] | Thenable<vscode.CodeLens[]> {
-		const config = vscode.workspace.getConfiguration('pest-runner-icons');
-		const enableCodeLens = config.get<boolean>('enableCodeLens', true);
+	public refresh(): void {
+		console.log('[CodeLensProvider] 🔄 Refresh triggered');
+		this._onDidChangeCodeLenses.fire();
+	}
 
-		if (!enableCodeLens) {
+	public provideCodeLenses(document: vscode.TextDocument): vscode.CodeLens[] {
+		const config = vscode.workspace.getConfiguration('pest-tests-runner');
+		if (!config.get<boolean>('enableCodeLens', true)) {
 			return [];
 		}
-
-		// Only provide CodeLens for PHP test files
 		if (!this.isPestTestFile(document)) {
 			return [];
 		}
@@ -30,46 +27,44 @@ export class PestCodeLensProvider implements vscode.CodeLensProvider {
 		const text = document.getText();
 		const lines = text.split('\n');
 
-		// Add CodeLens for the entire file (at the top)
-		const fileRange = new vscode.Range(0, 0, 0, 0);
-		codeLenses.push(
-			new vscode.CodeLens(fileRange, {
-				title: '$(run-all) Run File',
-				command: 'pest-runner-icons.runTestFile',
-				arguments: []
-			})
-		);
+		// File-level CodeLens with status
+		const fileResult = this.testResultsManager.getTestResult(document.uri.fsPath, '__FILE__');
+		const fileTitle = fileResult ? getTitleForStatus(fileResult, 'File') : '$(play) Run File';
+		codeLenses.push(new vscode.CodeLens(new vscode.Range(0, 0, 0, 0), {
+			title: fileTitle,
+			command: 'pest-tests-runner.runTestFile',
+			arguments: []
+		}));
 
-		// Parse and add CodeLens for each test
 		for (let i = 0; i < lines.length; i++) {
 			const line = lines[i];
-
-			// Match Pest test patterns: test(), it(), describe()
-			const testMatch = line.match(/^\s*(test|it)\s*\(\s*['"`]([^'"`]+)['"`]/);
-			const describeMatch = line.match(/^\s*describe\s*\(\s*['"`]([^'"`]+)['"`]/);
+			// Match test names with proper quote handling:
+			// - Capture the opening quote type (', ", or `)
+			// - Match everything until the same closing quote (allowing escaped quotes)
+			// - Support apostrophes, backslashes, and special characters in test names
+			const testMatch = line.match(/^\s*(test|it)\s*\(\s*(['"`])((?:(?!\2).|\\.)*)\2/);
+			const describeMatch = line.match(/^\s*describe\s*\(\s*(['"`])((?:(?!\1).|\\.)*)\1/);
 
 			if (testMatch) {
-				const testName = testMatch[2];
+				const testName = testMatch[3]; // The captured test name
 				const range = new vscode.Range(i, 0, i, line.length);
+				const result = this.testResultsManager.getTestResult(document.uri.fsPath, testName);
+				const title = result ? getTitleForStatus(result) : '$(play) Run';
 
-				codeLenses.push(
-					new vscode.CodeLens(range, {
-						title: '$(play) Run',
-						command: 'pest-runner-icons.runTest',
-						arguments: [testName, i]
-					})
-				);
+				console.log(`[CodeLensProvider] 🔍 Test at line ${i + 1}: "${testName}"`);
+				console.log(`  Status: ${result?.status || 'none'}, Title: ${title}`);
+
+				codeLenses.push(new vscode.CodeLens(range, { title, command: 'pest-tests-runner.runTest', arguments: [testName, i] }));
 			} else if (describeMatch) {
-				const describeName = describeMatch[1];
+				const describeName = describeMatch[2]; // The captured describe name
 				const range = new vscode.Range(i, 0, i, line.length);
+				const result = this.testResultsManager.getTestResult(document.uri.fsPath, describeName);
+				const title = result ? getTitleForStatus(result) : '$(play) Run Group';
 
-				codeLenses.push(
-					new vscode.CodeLens(range, {
-						title: '$(run-all) Run Group',
-						command: 'pest-runner-icons.runDescribeGroup',
-						arguments: [describeName, i]
-					})
-				);
+				console.log(`[CodeLensProvider] 🔍 Describe at line ${i + 1}: "${describeName}"`);
+				console.log(`  Status: ${result?.status || 'none'}, Title: ${title}`);
+
+				codeLenses.push(new vscode.CodeLens(range, { title, command: 'pest-tests-runner.runDescribeGroup', arguments: [describeName, i] }));
 			}
 		}
 
@@ -77,13 +72,40 @@ export class PestCodeLensProvider implements vscode.CodeLensProvider {
 	}
 
 	private isPestTestFile(document: vscode.TextDocument): boolean {
-		// Check if the file is a PHP file in a tests directory or ends with Test.php
 		const filePath = document.uri.fsPath.toLowerCase();
 		return (
 			document.languageId === 'php' &&
-			(filePath.includes('/tests/') ||
-				filePath.includes('\\tests\\') ||
-				filePath.endsWith('test.php'))
+			(filePath.includes('/tests/') || filePath.includes('\\tests\\') || filePath.endsWith('test.php'))
 		);
+	}
+}
+
+function getTitleForStatus(result: { status: string; duration?: number }, label?: string): string {
+	const defaultLabel = label || 'Run';
+
+	// Format duration: show more precision for very fast tests (< 0.01s)
+	const formatDuration = (duration: number): string => {
+		if (duration < 0.01) {
+			// For very fast tests, show up to 4 decimal places
+			return `${duration.toFixed(4)}s`;
+		}
+		return `${duration.toFixed(2)}s`;
+	};
+
+	switch (result.status) {
+		case 'passed':
+			// Use green circle emoji for visual color feedback
+			return `✅ Passed${result.duration !== undefined ? ` (${formatDuration(result.duration)})` : ''}`;
+		case 'failed':
+			// Use red X emoji for visual color feedback
+			return `❌ Failed${result.duration !== undefined ? ` (${formatDuration(result.duration)})` : ''}`;
+		case 'running':
+			// Use hourglass emoji for running state
+			return `⏳ Running${label ? ` ${label}` : ''}...`;
+		case 'skipped':
+			// Use yellow circle emoji - more visible than ⊘
+			return `🟡 Skipped${result.duration !== undefined ? ` (${formatDuration(result.duration)})` : ''}`;
+		default:
+			return `$(play) ${defaultLabel}`;
 	}
 }

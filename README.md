@@ -1,107 +1,64 @@
-# Pest Runner Icons
+# Pest Tests Runner 🐛✨
 
-Add convenient CodeLens icons to run Pest tests directly from your PHP test files in VS Code.
+Run your Pest PHP tests directly from VS Code with inline status indicators and instant visual feedback.
 
 ## Features
 
-- **CodeLens Icons**: Visual run buttons appear above each test, describe block, and at the file level
-- **Better Pest Integration**: Automatically uses [Better Pest](https://marketplace.visualstudio.com/items?itemName=m1guelpf.better-pest) extension if installed
-- **Flexible Execution**: Run individual tests, test groups, entire files, or the full test suite
-- **Keyboard Shortcuts**: Compatible with Better Pest keyboard shortcuts when using integration mode
+- **Click-to-run CodeLens** on every test, describe group, and file
+- **Colored status indicators**: ✅ Pass (green) | ❌ Fail (red) | 🟡 Skip (yellow) | ⏳ Running (blue)
+- **Inline results** displayed at end of test lines
+- **Smart tracking** - results persist across sessions
+- **Auto-save** before test execution
+- **Cross-platform** - Windows/Linux/Mac compatible
 
-## Usage
+## Quick Start
 
-### CodeLens Icons
-
-When you open a Pest test file, you'll see clickable icons:
-
-- **$(run-all) Run File** - At the top of the file to run all tests in the file
-- **$(play) Run** - Next to each `test()` or `it()` call to run that specific test
-- **$(run-all) Run Group** - Next to each `describe()` block to run all tests in that group
-
-### Example
-
-```php
-<?php
-
-// $(run-all) Run File appears here
-
-describe('User authentication', function () { // $(run-all) Run Group
-    test('user can login', function () { // $(play) Run
-        // Test code...
-    });
-    
-    it('requires valid credentials', function () { // $(play) Run
-        // Test code...
-    });
-});
-
-test('database connection works', function () { // $(play) Run
-    // Test code...
-});
-```
+1. Open a Pest test file in `tests/` directory
+2. CodeLens buttons appear above tests: `▶ Run` / `✅ Passed` / `❌ Failed`
+3. Click to run - results show instantly with execution time
 
 ## Configuration
 
-Access settings via `File > Preferences > Settings` and search for "Pest Runner Icons":
-
-- **`pest-runner-icons.enableCodeLens`** (default: `true`)  
-  Enable or disable CodeLens icons
-
-- **`pest-runner-icons.useBetterPest`** (default: `true`)  
-  Use Better Pest extension commands when available. Falls back to built-in execution if Better Pest is not installed.
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `pest-tests-runner.enableCodeLens` | `true` | Show CodeLens run buttons |
+| `pest-tests-runner.showInlineResults` | `true` | Display colored status inline |
+| `pest-tests-runner.autoSaveBeforeRun` | `true` | Auto-save before running |
+| `pest-tests-runner.showTerminal` | `false` | Show terminal output |
+| `pest-tests-runner.debugMode` | `false` | Enable debug logging |
 
 ## Requirements
 
-- PHP test files using [Pest](https://pestphp.com/)
-- (Optional) [Better Pest](https://marketplace.visualstudio.com/items?itemName=m1guelpf.better-pest) extension for enhanced test running features
+- VS Code 1.59.0+
+- PHP with Pest testing framework
+- Test files in `tests/` directory
 
-## Better Pest Integration
+## Troubleshooting
 
-When Better Pest is installed and `useBetterPest` is enabled, this extension:
+**Tests not showing results?**
 
-1. Leverages Better Pest's advanced features (SSH, Docker, custom configurations)
-2. Uses Better Pest's task runner for better output formatting
-3. Respects all Better Pest configuration settings
-4. Provides visual CodeLens icons for Better Pest's keyboard shortcuts
+- Enable `pest-tests-runner.debugMode` and check Output panel
+- Verify: `./vendor/bin/pest --version`
 
-If Better Pest is not installed, the extension falls back to a simple built-in test runner.
+**CodeLens not appearing?**
 
-## Commands
+- Ensure file is in `tests/` folder
+- Check `pest-tests-runner.enableCodeLens` is enabled
 
-The following commands are available in the Command Palette (`Ctrl+Shift+P` or `Cmd+Shift+P`):
-
-- **Pest Runner Icons: Run Test** - Run a specific test
-- **Pest Runner Icons: Run Test File** - Run all tests in the current file
-- **Pest Runner Icons: Run Test Suite** - Run the entire test suite
-
-## Installation
-
-1. Install from VS Code Marketplace (search for "Pest Runner Icons")
-2. Or install manually:
-   - Download the `.vsix` file
-   - Run `code --install-extension pest-runner-icons-0.0.1.vsix`
-
-## Known Issues
-
-- CodeLens may not appear for tests with complex multiline declarations
-- Only detects `test()`, `it()`, and `describe()` at the start of lines
-
-## Contributing
-
-Found a bug or have a feature request? Please open an issue on [GitHub](https://github.com/yourusername/pest-runner-icons).
+**Windows issues?**
+Set custom path: `"pest-tests-runner.pestBinaryPath": "php vendor/pestphp/pest/bin/pest"`
 
 ## Release Notes
 
-### 0.0.1
+### 0.1.6
 
-Initial release:
-
-- CodeLens icons for Pest tests
-- Better Pest integration
-- Fallback built-in test runner
-- Configuration options
+- Rebranded to "Pest Tests Runner"
+- Inline colored results with theme colors
+- Better skipped indicator (🟡)
+- File-level status tracking
+- High-precision duration display
+- Fixed test names with apostrophes/backslashes
 
 ## License
 
-MIT
+MIT © [dark SHADOW](https://github.com/bool-kev)

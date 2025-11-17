@@ -378,6 +378,18 @@ function escapeTestName(testName: string): string {
 }
 
 /**
+ * Decode escaped characters in test/describe names captured from regex
+ * Converts: "nom avec l\'apostrophe" -> "nom avec l'apostrophe"
+ * Converts: "nom avec \"quote" -> "nom avec "quote"
+ */
+function decodeTestName(rawName: string): string {
+	return rawName
+		.replace(/\\'/g, "'")   // \' -> '
+		.replace(/\\"/g, '"')   // \" -> "
+		.replace(/\\\\/g, '\\'); // \\ -> \
+}
+
+/**
  * Extract all test names from a PHP test file
  * Returns an array of test names found in the file
  */
@@ -390,9 +402,12 @@ function extractTestNamesFromFile(filePath: string): string[] {
 
 		for (const line of lines) {
 			// Match test() or it() calls with proper quote handling
-			const testMatch = line.match(/^\s*(test|it)\s*\(\s*(['"`])((?:(?!\2).|\\.)*)\2/);
+			// (?:[^'"`\\]|\\.)* matches either non-quote/non-backslash chars OR escaped chars
+			const testMatch = line.match(/^\s*(test|it)\s*\(\s*(['"`])((?:[^'"`\\]|\\.)*)\2/);
 			if (testMatch) {
-				testNames.push(testMatch[3]);
+				const rawName = testMatch[3];
+				const decodedName = decodeTestName(rawName);
+				testNames.push(decodedName);
 			}
 		}
 	} catch (error) {
@@ -419,10 +434,14 @@ function extractTestNamesFromDescribe(filePath: string, describeName: string): s
 
 		for (const line of lines) {
 			// Check if we're entering the target describe block
-			const describeMatch = line.match(/^\s*describe\s*\(\s*(['"`])((?:(?!\1).|\\.)*)\1/);
-			if (describeMatch && describeMatch[2] === describeName) {
-				inDescribeBlock = true;
-				describeStartDepth = braceDepth;
+			const describeMatch = line.match(/^\s*describe\s*\(\s*(['"`])((?:[^'"`\\]|\\.)*)\1/);
+			if (describeMatch) {
+				const rawDescribeName = describeMatch[2];
+				const decodedDescribeName = decodeTestName(rawDescribeName);
+				if (decodedDescribeName === describeName) {
+					inDescribeBlock = true;
+					describeStartDepth = braceDepth;
+				}
 			}
 
 			// Count braces to track depth
@@ -432,9 +451,11 @@ function extractTestNamesFromDescribe(filePath: string, describeName: string): s
 
 			// If we're in the describe block, extract test names
 			if (inDescribeBlock) {
-				const testMatch = line.match(/^\s*(test|it)\s*\(\s*(['"`])((?:(?!\2).|\\.)*)\2/);
+				const testMatch = line.match(/^\s*(test|it)\s*\(\s*(['"`])((?:[^'"`\\]|\\.)*)\2/);
 				if (testMatch) {
-					testNames.push(testMatch[3]);
+					const rawTestName = testMatch[3];
+					const decodedTestName = decodeTestName(rawTestName);
+					testNames.push(decodedTestName);
 				}
 
 				// Exit the describe block when we return to the starting depth

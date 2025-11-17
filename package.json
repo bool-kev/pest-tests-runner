@@ -92,11 +92,6 @@
           "type": "boolean",
           "default": true,
           "description": "Automatically save the current file before running tests"
-        },
-        "pest-tests-runner.showInlineResults": {
-          "type": "boolean",
-          "default": true,
-          "description": "Show colored test results inline in the editor (✅ passed, ❌ failed, 🟡 skipped)"
         }
       }
     }

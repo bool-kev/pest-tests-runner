@@ -98,9 +98,8 @@ function getTitleForStatus(result: { status: string; duration?: number; message?
 			// Use green circle emoji for visual color feedback
 			return `✅ Passed${result.duration !== undefined ? ` (${formatDuration(result.duration)})` : ''}`;
 		case 'failed':
-			// Show error message instead of duration for failed tests
-			const errorMsg = result.message ? `: ${result.message.substring(0, 60)}${result.message.length > 60 ? '...' : ''}` : '';
-			return `❌ Failed${errorMsg}`;
+			// Just show Failed status without message (message is shown inline on error line)
+			return `❌ Failed`;
 		case 'running':
 			// Use hourglass emoji for running state
 			return `⏳ Running${label ? ` ${label}` : ''}...`;

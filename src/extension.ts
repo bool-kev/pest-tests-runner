@@ -20,52 +20,23 @@ let currentExecutionContext: {
 	describesInExecution: Set<string>; // Track all describes found during file/suite execution
 } = { type: null, describesInExecution: new Set() };
 
-// Text decorations for colored test status in editor
-let passedDecorationType: vscode.TextEditorDecorationType;
-let failedDecorationType: vscode.TextEditorDecorationType;
-let runningDecorationType: vscode.TextEditorDecorationType;
-let skippedDecorationType: vscode.TextEditorDecorationType;
+// Text decorations for error/skip messages in editor
+let errorLineDecorationType: vscode.TextEditorDecorationType;
 
 export function activate(context: vscode.ExtensionContext) {
 	// Create output channel for logs
 	outputChannel = vscode.window.createOutputChannel('Pest Runner Icons');
 	outputChannel.appendLine('🐛 Pest Runner Icons activated!');
 
-	// Create text decorations for test status colors
-	passedDecorationType = vscode.window.createTextEditorDecorationType({
+	// Decoration for error and skip messages at the line where they occurred
+	errorLineDecorationType = vscode.window.createTextEditorDecorationType({
 		after: {
 			margin: '0 0 0 1em',
-			color: new vscode.ThemeColor('testing.iconPassed'),
-			fontWeight: 'bold'
+			color: new vscode.ThemeColor('errorForeground'),
+			fontStyle: 'italic'
 		},
-		isWholeLine: false
-	});
-
-	failedDecorationType = vscode.window.createTextEditorDecorationType({
-		after: {
-			margin: '0 0 0 1em',
-			color: new vscode.ThemeColor('testing.iconFailed'),
-			fontWeight: 'bold'
-		},
-		isWholeLine: false
-	});
-
-	runningDecorationType = vscode.window.createTextEditorDecorationType({
-		after: {
-			margin: '0 0 0 1em',
-			color: new vscode.ThemeColor('testing.iconQueued'),
-			fontWeight: 'bold'
-		},
-		isWholeLine: false
-	});
-
-	skippedDecorationType = vscode.window.createTextEditorDecorationType({
-		after: {
-			margin: '0 0 0 1em',
-			color: new vscode.ThemeColor('testing.iconSkipped'),
-			fontWeight: 'bold'
-		},
-		isWholeLine: false
+		isWholeLine: false,
+		backgroundColor: new vscode.ThemeColor('errorBackground')
 	});
 
 	// Initialize test results manager
@@ -135,11 +106,7 @@ export function activate(context: vscode.ExtensionContext) {
 		runTestFileCommand,
 		runTestSuiteCommand,
 		runDescribeGroupCommand,
-		outputChannel,
-		passedDecorationType,
-		failedDecorationType,
-		runningDecorationType,
-		skippedDecorationType
+		outputChannel
 	);
 }
 
@@ -152,20 +119,8 @@ function log(message: string, type: 'info' | 'success' | 'warning' | 'error' = '
  * Update test decorations (colored status indicators) in the active editor
  */
 function updateTestDecorations() {
-	const config = vscode.workspace.getConfiguration('pest-tests-runner');
-	const showInlineResults = config.get<boolean>('showInlineResults', true);
-
 	const editor = vscode.window.activeTextEditor;
 	if (!editor || editor.document.languageId !== 'php') {
-		return;
-	}
-
-	// Clear decorations if disabled
-	if (!showInlineResults) {
-		editor.setDecorations(passedDecorationType, []);
-		editor.setDecorations(failedDecorationType, []);
-		editor.setDecorations(runningDecorationType, []);
-		editor.setDecorations(skippedDecorationType, []);
 		return;
 	}
 
@@ -176,10 +131,7 @@ function updateTestDecorations() {
 		return;
 	}
 
-	const passedDecorations: vscode.DecorationOptions[] = [];
-	const failedDecorations: vscode.DecorationOptions[] = [];
-	const runningDecorations: vscode.DecorationOptions[] = [];
-	const skippedDecorations: vscode.DecorationOptions[] = [];
+	const errorLineDecorations: vscode.DecorationOptions[] = [];
 
 	const text = editor.document.getText();
 	const lines = text.split('\n');
@@ -195,46 +147,64 @@ function updateTestDecorations() {
 
 			if (result && result.status !== 'none') {
 				const range = new vscode.Range(i, line.length, i, line.length);
-				let statusText = '';
-				let decorationArray: vscode.DecorationOptions[] | null = null;
 
-				switch (result.status) {
-					case 'passed':
-						statusText = `✅ ${formatDuration(result.duration || 0)}`;
-						decorationArray = passedDecorations;
-						break;
-					case 'failed':
-						// Show error message instead of duration for failed tests
-						const errorMsg = result.message ? result.message.substring(0, 60) : 'Failed';
-						statusText = `❌ ${errorMsg}${result.message && result.message.length > 60 ? '...' : ''}`;
-						decorationArray = failedDecorations;
-						break;
-					case 'running':
-						statusText = '⏳ Running...';
-						decorationArray = runningDecorations;
-						break;
-					case 'skipped':
-						statusText = `🟡 ${formatDuration(result.duration || 0)}`;
-						decorationArray = skippedDecorations;
-						break;
-				}				if (decorationArray) {
-					decorationArray.push({
+				// For failed tests, show error message at the specific line or on test line if not detected
+				if (result.status === 'failed') {
+					const errorMessage = result.message || 'Test failed';
+					const hasSpecificErrorLine = result.line && result.line > 0 && result.line !== i + 1;
+					
+					if (hasSpecificErrorLine) {
+						// Show error on the specific line where it occurred
+						const errorLine = result.line! - 1; // Convert to 0-based index
+						if (errorLine >= 0 && errorLine < lines.length) {
+							const errorRange = new vscode.Range(errorLine, lines[errorLine].length, errorLine, lines[errorLine].length);
+							errorLineDecorations.push({
+								range: errorRange,
+								renderOptions: {
+									after: {
+										contentText: ` ⚠️ ${errorMessage}`,
+										color: new vscode.ThemeColor('errorForeground'),
+										fontStyle: 'italic'
+									}
+								},
+								hoverMessage: result.details ? `**Error:**\n\n${result.message}\n\n**Details:**\n\`\`\`\n${result.details}\n\`\`\`` : `**Error:**\n\n${result.message}`
+							});
+						}
+					} else {
+						// No specific line detected - show error on test line
+						errorLineDecorations.push({
+							range,
+							renderOptions: {
+								after: {
+									contentText: ` ⚠️ ${errorMessage}`,
+									color: new vscode.ThemeColor('errorForeground'),
+									fontStyle: 'italic'
+								}
+							},
+							hoverMessage: result.details ? `**Error:**\n\n${result.message}\n\n**Details:**\n\`\`\`\n${result.details}\n\`\`\`` : `**Error:**\n\n${result.message}`
+						});
+					}
+				}
+
+				// For skipped tests, show skip message
+				if (result.status === 'skipped' && result.message) {
+					errorLineDecorations.push({
 						range,
 						renderOptions: {
 							after: {
-								contentText: ` ${statusText}`
+								contentText: ` 🟡 ${result.message}`,
+								color: new vscode.ThemeColor('testing.iconSkipped'),
+								fontStyle: 'italic'
 							}
-						}
+						},
+						hoverMessage: `**Skipped:**\n\n${result.message}`
 					});
 				}
 			}
 		}
 	}
 
-	editor.setDecorations(passedDecorationType, passedDecorations);
-	editor.setDecorations(failedDecorationType, failedDecorations);
-	editor.setDecorations(runningDecorationType, runningDecorations);
-	editor.setDecorations(skippedDecorationType, skippedDecorations);
+	editor.setDecorations(errorLineDecorationType, errorLineDecorations);
 }
 
 function logDebug(message: string) {
@@ -693,28 +663,29 @@ function handleTeamcityEvent(
 			updateTestDecorations();
 			break;
 
-		case TeamcityEvent.testFinished:
-			const startedTest = cache.get(flowId);
-			const durationMs = result.duration || 0;
-			const durationSec = durationMs / 1000; // Convert ms to seconds
+	case TeamcityEvent.testFinished:
+		const startedTest = cache.get(flowId);
+		const durationMs = result.duration || 0;
+		const durationSec = durationMs / 1000; // Convert ms to seconds
 
-			// Check if test failed (will be in cache from testFailed event)
-			const failedTest = cache.get(flowId);
-			if (failedTest && 'message' in failedTest) {
-				// Already handled by testFailed
-				logResult(`❌ Failed: ${testName} (${formatTeamcityDuration(durationMs)})`, 'failed');
-			} else {
-				logResult(`✅ Passed: ${testName} (${formatTeamcityDuration(durationMs)})`, 'passed');
-				testResultsManager.setTestResult(testFile, testName, 'passed', result.line || 0, 'test', durationSec, undefined, undefined, flowId, describeName);
-			}
+		// Check if test failed (will be in cache from testFailed event)
+		const cachedTest = cache.get(flowId);
+		if (cachedTest && cachedTest.event === TeamcityEvent.testFailed) {
+			// Already handled by testFailed
+			logResult(`❌ Failed: ${testName} (${formatTeamcityDuration(durationMs)})`, 'failed');
+		} else if (cachedTest && cachedTest.event === TeamcityEvent.testIgnored) {
+			// Test was skipped - already handled by testIgnored
+			logResult(`🟡 Skipped: ${testName}`, 'skipped');
+		} else {
+			logResult(`✅ Passed: ${testName} (${formatTeamcityDuration(durationMs)})`, 'passed');
+			testResultsManager.setTestResult(testFile, testName, 'passed', result.line || 0, 'test', durationSec, undefined, undefined, flowId, describeName);
+		}
 
-			cache.delete(flowId);
-			// Update UI immediately
-			codeLensProvider.refresh();
-			updateTestDecorations();
-			break;
-
-		case TeamcityEvent.testFailed:
+		cache.delete(flowId);
+		// Update UI immediately
+		codeLensProvider.refresh();
+		updateTestDecorations();
+		break;		case TeamcityEvent.testFailed:
 			logResult(`❌ FAILED: ${testName}`, 'failed');
 			log(`   Message: ${result.message || 'No message'}`);
 			if (result.details) {
@@ -735,21 +706,21 @@ function handleTeamcityEvent(
 			updateTestDecorations();
 			break;
 
-		case TeamcityEvent.testIgnored:
-			logResult(`🟡 SKIPPED: ${testName}`, 'skipped');
-			if (result.message) {
-				log(`   Reason: ${result.message}`);
-			}
+	case TeamcityEvent.testIgnored:
+		logResult(`🟡 SKIPPED: ${testName}`, 'skipped');
+		if (result.message) {
+			log(`   Reason: ${result.message}`);
+		}
 
-			testResultsManager.setTestResult(testFile, testName, 'skipped', result.line || 0, 'test', undefined, result.message, undefined, flowId, describeName);
-			cache.delete(flowId);
+		testResultsManager.setTestResult(testFile, testName, 'skipped', result.line || 0, 'test', undefined, result.message, undefined, flowId, describeName);
+		
+		// Store in cache for testFinished handler (Pest sends testFinished even for skipped tests)
+		cache.set(flowId, result);
 
-			// Update UI immediately
-			codeLensProvider.refresh();
-			updateTestDecorations();
-			break;
-
-		case TeamcityEvent.testCount:
+		// Update UI immediately
+		codeLensProvider.refresh();
+		updateTestDecorations();
+		break;		case TeamcityEvent.testCount:
 			if (result.count) {
 				log(`📊 Total tests to run: ${result.count}`);
 			}

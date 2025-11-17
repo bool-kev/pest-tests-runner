@@ -1,19 +1,24 @@
 import * as vscode from 'vscode';
 import { PestCodeLensProvider } from './pestCodeLensProvider';
 import { TestResultsManager } from './testResultsManager';
-import { exec } from 'child_process';
-import { promisify } from 'util';
+import { spawn } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { XMLParser } from 'fast-xml-parser';
-
-const execAsync = promisify(exec);
+import { parseTeamcityLine, extractTestId, formatDuration as formatTeamcityDuration, TeamcityEvent, TeamcityResult } from './teamcityParser';
+import { parseTestsFromPhp, decodeTestName as astDecodeTestName } from './phpAstParser';
 
 let testResultsManager: TestResultsManager;
 let codeLensProvider: PestCodeLensProvider;
 let sharedTerminal: vscode.Terminal | undefined;
 let outputChannel: vscode.OutputChannel;
+
+// Track the current execution context (what is being run)
+let currentExecutionContext: {
+	type: 'test' | 'describe' | 'file' | 'suite' | null;
+	describeName?: string;
+	describesInExecution: Set<string>; // Track all describes found during file/suite execution
+} = { type: null, describesInExecution: new Set() };
 
 // Text decorations for colored test status in editor
 let passedDecorationType: vscode.TextEditorDecorationType;
@@ -199,7 +204,9 @@ function updateTestDecorations() {
 						decorationArray = passedDecorations;
 						break;
 					case 'failed':
-						statusText = `❌ ${formatDuration(result.duration || 0)}`;
+						// Show error message instead of duration for failed tests
+						const errorMsg = result.message ? result.message.substring(0, 60) : 'Failed';
+						statusText = `❌ ${errorMsg}${result.message && result.message.length > 60 ? '...' : ''}`;
 						decorationArray = failedDecorations;
 						break;
 					case 'running':
@@ -210,9 +217,7 @@ function updateTestDecorations() {
 						statusText = `🟡 ${formatDuration(result.duration || 0)}`;
 						decorationArray = skippedDecorations;
 						break;
-				}
-
-				if (decorationArray) {
+				}				if (decorationArray) {
 					decorationArray.push({
 						range,
 						renderOptions: {
@@ -276,90 +281,7 @@ function logResult(message: string, status: 'passed' | 'failed' | 'skipped' | 'r
 	outputChannel.appendLine(`[${timestamp}] ${icon} ${message}`);
 }
 
-function logSummary(passed: number, failed: number, skipped: number, totalDuration: number) {
-	outputChannel.appendLine('');
-	outputChannel.appendLine('═══════════════════════════════════════════════');
-	outputChannel.appendLine('                TEST SUMMARY                   ');
-	outputChannel.appendLine('═══════════════════════════════════════════════');
-	outputChannel.appendLine(`  ✅ Passed:  ${passed}`);
-	outputChannel.appendLine(`  ❌ Failed:  ${failed}`);
-	outputChannel.appendLine(`  🟡 Skipped: ${skipped}`);
-	outputChannel.appendLine(`  ⏱️  Total:   ${(passed + failed + skipped)} tests in ${formatDuration(totalDuration)}`);
-	outputChannel.appendLine('═══════════════════════════════════════════════');
-
-	if (failed > 0) {
-		outputChannel.appendLine('❌ TESTS FAILED');
-	} else if (passed > 0) {
-		outputChannel.appendLine('✅ ALL TESTS PASSED');
-	}
-	outputChannel.appendLine('');
-}
-
-/**
- * Extract the individual test name from a Pest XML testcase name
- * Format: "`Group` → `SubGroup` → it description" or "it description"
- * Returns: "description"
- */
-function extractTestNameFromXml(fullName: string): string {
-	// Split by the arrow separator
-	const parts = fullName.split('→').map(p => p.trim());
-	let testName = parts[parts.length - 1]; // Get last part
-
-	// Remove "it " prefix if present
-	if (testName.startsWith('it ')) {
-		testName = testName.substring(3);
-	}
-
-	// Remove backticks if present
-	testName = testName.replace(/`/g, '');
-
-	return testName.trim();
-}
-
-/**
- * Extract failure/error message from a testcase
- */
-function extractErrorMessage(tc: any): string | undefined {
-	if (tc.failure) {
-		if (typeof tc.failure === 'string') {
-			return tc.failure;
-		}
-		if (tc.failure['@_message']) {
-			return tc.failure['@_message'];
-		}
-		if (tc.failure['#text']) {
-			return tc.failure['#text'];
-		}
-	}
-
-	if (tc.error) {
-		if (typeof tc.error === 'string') {
-			return tc.error;
-		}
-		if (tc.error['@_message']) {
-			return tc.error['@_message'];
-		}
-		if (tc.error['#text']) {
-			return tc.error['#text'];
-		}
-	}
-
-	return undefined;
-}
-
-/**
- * Determine the status of a testcase
- */
-function getTestStatus(tc: any): 'passed' | 'failed' | 'skipped' {
-	if (tc.failure || tc.error) {
-		return 'failed';
-	}
-	// Check for skipped tests - Pest/PHPUnit can mark them in different ways
-	if (tc.skipped || tc['@_skipped'] || tc.skipped === '' || tc['skipped']) {
-		return 'skipped';
-	}
-	return 'passed';
-}
+// XML helper functions removed - now using Teamcity streaming format
 
 /**
  * Escape special characters in test names for shell command execution
@@ -398,15 +320,14 @@ function extractTestNamesFromFile(filePath: string): string[] {
 
 	try {
 		const content = fs.readFileSync(filePath, 'utf-8');
-		const lines = content.split('\n');
 
-		for (const line of lines) {
-			// Match test() or it() calls with proper quote handling
-			// (?:[^'"`\\]|\\.)* matches either non-quote/non-backslash chars OR escaped chars
-			const testMatch = line.match(/^\s*(test|it)\s*\(\s*(['"`])((?:[^'"`\\]|\\.)*)\2/);
-			if (testMatch) {
-				const rawName = testMatch[3];
-				const decodedName = decodeTestName(rawName);
+		// Use AST parser for more reliable extraction
+		const parsedTests = parseTestsFromPhp(content);
+
+		for (const test of parsedTests) {
+			// Only include test() and it(), not describe()
+			if (test.type === 'test' || test.type === 'it') {
+				const decodedName = astDecodeTestName(test.name);
 				testNames.push(decodedName);
 			}
 		}
@@ -420,47 +341,50 @@ function extractTestNamesFromFile(filePath: string): string[] {
 /**
  * Extract all test names within a specific describe block
  * Returns an array of test names found in the describe block
+ * 
+ * Note: AST parsing makes this simpler, but we still need to identify which
+ * tests belong to which describe. For now, we use a simple heuristic:
+ * - Find the describe block line number
+ * - Find all tests that come after it (until next describe or end of file)
+ * 
+ * This works for most cases. For complex nested describes, Pest's --filter
+ * with the describe name will handle it correctly.
  */
 function extractTestNamesFromDescribe(filePath: string, describeName: string): string[] {
 	const testNames: string[] = [];
 
 	try {
 		const content = fs.readFileSync(filePath, 'utf-8');
-		const lines = content.split('\n');
 
-		let inDescribeBlock = false;
-		let braceDepth = 0;
-		let describeStartDepth = 0;
+		// Use AST parser
+		const parsedTests = parseTestsFromPhp(content);
 
-		for (const line of lines) {
-			// Check if we're entering the target describe block
-			const describeMatch = line.match(/^\s*describe\s*\(\s*(['"`])((?:[^'"`\\]|\\.)*)\1/);
-			if (describeMatch) {
-				const rawDescribeName = describeMatch[2];
-				const decodedDescribeName = decodeTestName(rawDescribeName);
-				if (decodedDescribeName === describeName) {
-					inDescribeBlock = true;
-					describeStartDepth = braceDepth;
+		// Find the describe block with matching name
+		let describeLineNumber = -1;
+		let nextDescribeLineNumber = Number.MAX_SAFE_INTEGER;
+
+		for (const test of parsedTests) {
+			if (test.type === 'describe') {
+				const decodedName = astDecodeTestName(test.name);
+				if (decodedName === describeName && describeLineNumber === -1) {
+					// Found our target describe
+					describeLineNumber = test.line;
+				} else if (describeLineNumber !== -1 && test.line > describeLineNumber) {
+					// Found next describe after our target - this is the boundary
+					nextDescribeLineNumber = test.line;
+					break;
 				}
 			}
+		}
 
-			// Count braces to track depth
-			const openBraces = (line.match(/{/g) || []).length;
-			const closeBraces = (line.match(/}/g) || []).length;
-			braceDepth += openBraces - closeBraces;
-
-			// If we're in the describe block, extract test names
-			if (inDescribeBlock) {
-				const testMatch = line.match(/^\s*(test|it)\s*\(\s*(['"`])((?:[^'"`\\]|\\.)*)\2/);
-				if (testMatch) {
-					const rawTestName = testMatch[3];
-					const decodedTestName = decodeTestName(rawTestName);
-					testNames.push(decodedTestName);
-				}
-
-				// Exit the describe block when we return to the starting depth
-				if (braceDepth <= describeStartDepth && openBraces === 0 && closeBraces > 0) {
-					break;
+		// If we found the describe, extract all tests between it and the next describe
+		if (describeLineNumber !== -1) {
+			for (const test of parsedTests) {
+				if ((test.type === 'test' || test.type === 'it') &&
+					test.line > describeLineNumber &&
+					test.line < nextDescribeLineNumber) {
+					const decodedName = astDecodeTestName(test.name);
+					testNames.push(decodedName);
 				}
 			}
 		}
@@ -493,6 +417,13 @@ async function executeTestCommand(
 	runSuite: boolean,
 	type: 'test' | 'describe' | 'file' | 'suite'
 ) {
+	// Set execution context to track what is being run
+	currentExecutionContext = {
+		type,
+		describeName: type === 'describe' ? testName : undefined,
+		describesInExecution: new Set()
+	};
+
 	// Simple, clean header
 	const typeLabel = type === 'test' ? 'Test' : type === 'describe' ? 'Group' : type === 'file' ? 'File' : 'Suite';
 	log(`\n🚀 Running ${typeLabel}${testName ? `: "${testName}"` : ''}...`);
@@ -559,29 +490,27 @@ async function executeTestCommand(
 		filePathForCommand = filePath;
 	}
 
-	const tempDir = os.tmpdir();
-	const junitFile = path.join(tempDir, `pest-results-${Date.now()}.xml`);
-
 	logDebug(`File Path: ${filePath}`);
 	logDebug(`File Path for Command: ${filePathForCommand}`);
 	logDebug(`Platform: ${process.platform}`);
 	logDebug(`Shell: ${vscode.env.shell}`);
 	logDebug(`Is Bash on Windows: ${isBashOnWindows}`);
 	logDebug(`Pest Binary: ${pestBinary}`);
-	logDebug(`JUnit File: ${junitFile}`);
 
-	let command = '';
+	// Build command args for spawn (Teamcity format for streaming)
+	let args: string[] = [];
 	if (runSuite) {
-		command = `${pestBinary} --log-junit "${junitFile}"`;
+		args = ['--teamcity'];
 	} else if (runFile) {
-		command = `${pestBinary} "${filePathForCommand}" --log-junit "${junitFile}"`;
+		args = [filePathForCommand, '--teamcity'];
 	} else if (testName) {
 		// Escape the test name to handle apostrophes, backslashes, and other special characters
 		const escapedTestName = escapeTestName(testName);
-		command = `${pestBinary} "${filePathForCommand}" --filter "${escapedTestName}" --log-junit "${junitFile}"`;
+		// Wrap in double quotes to handle spaces in test names when shell: true
+		args = [filePathForCommand, '--filter', `"${escapedTestName}"`, '--teamcity'];
 	}
 
-	logDebug(`Command: ${command}`);
+	logDebug(`Command: ${pestBinary} ${args.join(' ')}`);
 
 	// Set running status for tests
 	if (testName && type === 'test') {
@@ -624,295 +553,269 @@ async function executeTestCommand(
 			logDebug(`Created new terminal`);
 		}
 		sharedTerminal.show();
-		sharedTerminal.sendText(command);
+		const terminalCommand = `${pestBinary} ${args.join(' ')}`;
+		sharedTerminal.sendText(terminalCommand);
 		logDebug(`Command sent to terminal`);
 	}
 
-	try {
-		logDebug(`Executing command via exec...`);
+	// Execute with spawn for real-time streaming
+	return new Promise<void>((resolve, reject) => {
+		logDebug(`Executing command via spawn with streaming...`);
 
-		// On Windows with bash, we need to use bash explicitly
-		const execOptions: any = {
+		// Cache for tracking test results by flowId
+		const testCache = new Map<number, TeamcityResult>();
+		let buffer = '';
+
+		// Spawn options
+		const spawnOptions: any = {
 			cwd: workspaceFolder.uri.fsPath,
-			maxBuffer: 1024 * 1024 * 10
+			shell: isBashOnWindows ? vscode.env.shell : true
 		};
 
-		// If using bash on Windows, specify bash as the shell
-		if (isBashOnWindows) {
-			execOptions.shell = vscode.env.shell;
-			logDebug(`Using shell: ${execOptions.shell}`);
-		}
+		logDebug(`Spawn options: ${JSON.stringify(spawnOptions)}`);
 
-		const { stdout, stderr } = await execAsync(command, execOptions);
-		logDebug(`Command executed successfully`);
-		if (stdout) {
-			const stdoutStr = stdout.toString();
-			logDebug(`STDOUT: ${stdoutStr.substring(0, 200)}...`);
-		}
-		if (stderr) {
-			const stderrStr = stderr.toString();
-			logDebug(`STDERR: ${stderrStr.substring(0, 200)}...`);
-		}
+		const process = spawn(pestBinary, args, spawnOptions);
 
-		// Wait a bit for the file to be written
-		logDebug(`Waiting 200ms for XML file to be written...`);
-		await new Promise(resolve => setTimeout(resolve, 200));
+		process.stdout?.on('data', (data: Buffer) => {
+			buffer += data.toString();
+			const lines = buffer.split('\n');
 
-		logDebug(`Checking if JUnit file exists...`);
-		if (fs.existsSync(junitFile)) {
-			logDebug(`JUnit file found!`);
-			const xmlContent = fs.readFileSync(junitFile, 'utf-8');
-			const fileSize = xmlContent.length;
-			logDebug(`JUnit file size: ${fileSize} bytes`);
-			logDebug(`First 300 chars of XML:\n${xmlContent.substring(0, 300)}...`);
-			logDebug(`Starting XML parsing...`);
-			await parseJUnitResults(xmlContent, filePath, testName, type, testResultsManager);
-			fs.unlinkSync(junitFile);
-			logDebug(`JUnit file deleted`);
-		} else {
-			log(`⚠️ JUnit file NOT FOUND`);
-			logDebug(`JUnit file path: ${junitFile}`);
-			if (testName && (type === 'test' || type === 'describe')) {
-				logResult(`No results file - assuming passed`, 'passed');
-				testResultsManager.setTestResult(filePath, testName, 'passed', 0, type);
-			}
-		}
-	} catch (error: any) {
-		log(`❌ Test execution failed: ${error.message}`);
-		logDebug(`Error stack: ${error.stack?.substring(0, 200)}`);
+			// Keep the last incomplete line in buffer
+			buffer = lines.pop() || '';
 
-		// Wait a bit for the file to be written even on error
-		logDebug(`Waiting 200ms for XML file (after error)...`);
-		await new Promise(resolve => setTimeout(resolve, 200));
+			// Process each complete line
+			for (const line of lines) {
+				if (!line.trim()) { continue; }
 
-		logDebug(`Checking if JUnit file exists (after error)...`);
-		if (fs.existsSync(junitFile)) {
-			try {
-				logDebug(`JUnit file found after error!`);
-				const xmlContent = fs.readFileSync(junitFile, 'utf-8');
-				const fileSize = xmlContent.length;
-				logDebug(`JUnit file size: ${fileSize} bytes`);
-				logDebug(`First 300 chars of XML:\n${xmlContent.substring(0, 300)}...`);
-				logDebug(`Starting XML parsing (after error)...`);
-				await parseJUnitResults(xmlContent, filePath, testName, type, testResultsManager);
-				fs.unlinkSync(junitFile);
-				logDebug(`JUnit file deleted`);
-			} catch (parseError: any) {
-				log(`❌ Failed to parse JUnit file: ${parseError.message}`);
-				if (testName && (type === 'test' || type === 'describe')) {
-					logResult(`Parse error - marking as failed`, 'failed');
-					testResultsManager.setTestResult(filePath, testName, 'failed', 0, type);
+				logDebug(`OUTPUT: ${line}`);
+
+				// Try to parse as Teamcity format
+				const teamcityResult = parseTeamcityLine(line);
+
+				if (teamcityResult) {
+					log(`[DEBUG parseTeamcityLine] Event: ${teamcityResult.event}, Name: ${teamcityResult.name}, LocationHint: ${teamcityResult.locationHint || 'UNDEFINED'}`);
+					handleTeamcityEvent(teamcityResult, filePath, testCache);
+				} else {
+					// Regular output - display in output channel
+					log(line);
 				}
 			}
-		} else {
-			logDebug(`JUnit file NOT FOUND after error at: ${junitFile}`);
-			if (testName && (type === 'test' || type === 'describe')) {
-				logResult(`No results file after error - marking as failed`, 'failed');
-				testResultsManager.setTestResult(filePath, testName, 'failed', 0, type);
-			}
-		}
-	}
-}
+		});
 
+		process.stderr?.on('data', (data: Buffer) => {
+			const error = data.toString();
+			logDebug(`STDERR: ${error}`);
+			log(`⚠️ ${error}`);
+		});
 
-export async function parseJUnitResults(
-	xmlContent: string,
-	filePath: string,
-	testName: string,
-	type: 'test' | 'describe' | 'file' | 'suite',
-	testResultsManager: TestResultsManager
-) {
-	logDebug(`Parsing XML for ${type}: "${testName}"`);
+		process.on('error', (error: Error) => {
+			log(`❌ Process error: ${error.message}`);
+			logDebug(`Error stack: ${error.stack}`);
+			reject(error);
+		});
 
-	const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@_' });
-	const parsed = parser.parse(xmlContent);
+		process.on('close', (code: number | null) => {
+			logDebug(`Process exited with code: ${code}`);
 
-	if (!parsed.testsuites) {
-		log(`❌ No test results found in XML`);
-		return;
-	}
-
-	const suites = Array.isArray(parsed.testsuites.testsuite)
-		? parsed.testsuites.testsuite
-		: [parsed.testsuites.testsuite].filter(Boolean);
-
-	logDebug(`Found ${suites.length} test suite(s)`);
-
-	// For 'file' or 'suite' type, update all tests in the file
-	if (type === 'file' || type === 'suite') {
-		logDebug(`Processing ${type === 'file' ? 'FILE' : 'SUITE'} - updating all tests`);
-
-		let passedCount = 0;
-		let failedCount = 0;
-		let skippedCount = 0;
-		let totalDuration = 0;
-
-		for (const suite of suites) {
-			const cases = Array.isArray(suite.testcase)
-				? suite.testcase
-				: [suite.testcase].filter(Boolean);
-
-			logDebug(`Suite has ${cases.length} test case(s)`);
-
-			for (const tc of cases) {
-				if (!tc['@_name']) {
-					continue;
-				}
-
-				const tcName = tc['@_name'];
-				const duration = parseFloat(tc['@_time'] ?? 0);
-				const individualTestName = extractTestNameFromXml(tcName);
-				const message = extractErrorMessage(tc);
-				const status = getTestStatus(tc);
-
-				// Count results
-				if (status === 'passed') {
-					passedCount++;
-				} else if (status === 'failed') {
-					failedCount++;
-				} else if (status === 'skipped') {
-					skippedCount++;
-				}
-				totalDuration += duration;
-
-				// Update the test result
-				testResultsManager.setTestResult(filePath, individualTestName, status, 0, 'test', duration, message);
-				logResult(`Test "${individualTestName}" → ${status.toUpperCase()} (${formatDuration(duration)})`, status);
-			}
-		}
-
-		logDebug(`Updated all tests in ${type}`);
-		logSummary(passedCount, failedCount, skippedCount, totalDuration);
-
-		// Update file-level status based on results
-		if (type === 'file' || type === 'suite') {
-			const fileStatus = failedCount > 0 ? 'failed' : (skippedCount > 0 && passedCount === 0) ? 'skipped' : 'passed';
-			testResultsManager.setTestResult(filePath, '__FILE__', fileStatus, 0, 'test', totalDuration);
-			logDebug(`File-level status set to: ${fileStatus}`);
-		}
-
-		return;
-	}
-
-	if (!testName || (type !== 'test' && type !== 'describe')) {
-		logDebug(`Parsing skipped: no testName or invalid type (${type})`);
-		return;
-	}
-
-	// For Pest tests, the name format in XML is: "`Group` → `SubGroup` → it description"
-	// We need to match based on the test description part
-	const escapedTestName = testName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-
-	if (type === 'test') {
-		let found = false;
-
-		for (const suite of suites) {
-			const cases = Array.isArray(suite.testcase)
-				? suite.testcase
-				: [suite.testcase].filter(Boolean);
-
-			logDebug(`Suite has ${cases.length} test case(s)`);
-
-			for (const tc of cases) {
-				if (!tc['@_name']) {
-					continue;
-				}
-
-				const tcName = tc['@_name'];
-				logDebug(`Checking: "${tcName}"`);
-
-				// Match if the test name appears anywhere in the XML name
-				// This handles Pest's format: "`Group` → `SubGroup` → it description"
-				if (tcName.includes(testName) || tcName.endsWith(testName)) {
-					found = true;
-					const duration = parseFloat(tc['@_time'] ?? 0);
-					const message = extractErrorMessage(tc);
-					const status = getTestStatus(tc);
-
-					testResultsManager.setTestResult(filePath, testName, status, 0, type, duration, message);
-					logResult(`Test "${testName}" ${status.toUpperCase()} (${formatDuration(duration)})`, status);
-
-					break;
-				}
-			}
-			if (found) {
-				break;
-			}
-		}
-
-		if (!found) {
-			log(`⚠️ Test "${testName}" not found in results`);
-			logDebug(`This could mean the test name doesn't match any testcase in the XML`);
-			testResultsManager.setTestResult(filePath, testName, 'none', 0, type);
-		}
-	}
-
-	if (type === 'describe') {
-		logDebug(`Processing DESCRIBE group: "${testName}"`);
-		// For describe groups, collect all testcases that start with the group name
-		// Pest format: "`GroupName` → `SubGroup` → it description"
-		const describeCases: any[] = [];
-
-		for (const suite of suites) {
-			const cases = Array.isArray(suite.testcase)
-				? suite.testcase
-				: [suite.testcase].filter(Boolean);
-
-			for (const tc of cases) {
-				if (!tc['@_name']) {
-					continue;
-				}
-
-				const tcName = tc['@_name'];
-				// Match if the describe name appears at the start of the test name
-				if (tcName.includes(`\`${testName}\``)) {
-					describeCases.push(tc);
-					logDebug(`Matched to group: "${tcName}"`);
-				}
-			}
-		}
-
-		if (describeCases.length > 0) {
-			logDebug(`Found ${describeCases.length} test(s) in describe group`);
-
-			// Update each individual test in the group
-			for (const tc of describeCases) {
-				const tcName = tc['@_name'];
-				const duration = parseFloat(tc['@_time'] ?? 0);
-				const individualTestName = extractTestNameFromXml(tcName);
-				const message = extractErrorMessage(tc);
-				const status = getTestStatus(tc);
-
-				// Update the individual test result
-				testResultsManager.setTestResult(filePath, individualTestName, status, 0, 'test', duration, message);
-				logResult(`Individual test "${individualTestName}" → ${status.toUpperCase()} (${formatDuration(duration)})`, status);
-			}
-
-			// Calculate group status
-			const anyFailed = describeCases.some(tc => tc.failure || tc.error);
-			const anySkipped = describeCases.some(tc => tc.skipped);
-			const allSkipped = describeCases.every(tc => tc.skipped);
-			const duration = describeCases.reduce((sum, tc) => sum + parseFloat(tc['@_time'] ?? 0), 0);
-
-			logDebug(`Any Failed: ${anyFailed}, Any Skipped: ${anySkipped}, All Skipped: ${allSkipped}`);
-
-			let status: 'passed' | 'failed' | 'skipped';
-			if (anyFailed) {
-				status = 'failed';
-			} else if (anySkipped && allSkipped) {
-				status = 'skipped';
+			if (code === 0) {
+				log(`✅ Tests completed successfully`);
 			} else {
-				status = 'passed';
+				log(`⚠️ Tests completed with exit code: ${code}`);
 			}
 
-			logDebug(`Final Group Status: ${status}`);
-			testResultsManager.setTestResult(filePath, testName, status, 0, type, duration);
-			logResult(`Describe group "${testName}" ${status.toUpperCase()} (${describeCases.length} tests, ${formatDuration(duration)})`, status);
-		} else {
-			log(`⚠️ Describe group "${testName}" not found in results`);
-			logDebug(`This could mean the group name doesn't match any testcase in the XML`);
-			testResultsManager.setTestResult(filePath, testName, 'none', 0, type);
+			// Refresh UI one final time
+			codeLensProvider.refresh();
+			updateTestDecorations();
+
+			// Reset execution context
+			currentExecutionContext = { type: null, describesInExecution: new Set() };
+
+			resolve();
+		});
+	});
+}
+
+/**
+ * Handle Teamcity event and update test results in real-time
+ */
+function handleTeamcityEvent(
+	result: TeamcityResult,
+	currentFilePath: string,
+	cache: Map<number, TeamcityResult>
+) {
+	logDebug(`Teamcity Event: ${result.event} - ${result.name || 'N/A'}`);
+
+	// Extract test info
+	log(`[DEBUG extractTestId] Input name: "${result.name}"`);
+	log(`[DEBUG extractTestId] Input locationHint: "${result.locationHint || 'N/A'}"`);
+	const testInfo = extractTestId(result);
+	log(`[DEBUG extractTestId] Output: ${testInfo ? JSON.stringify(testInfo) : 'NULL'}`);
+
+	if (!testInfo && result.event !== TeamcityEvent.testCount) {
+		logDebug(`Could not extract test info from result`);
+		return;
+	}
+
+	const flowId = result.flowId!;
+	// Always use currentFilePath for consistency with CodeLens
+	const testFile = currentFilePath;
+	const testName = testInfo?.testName || result.name || '';
+
+	// Extract describe name from Teamcity format: `DescribeName` → testName
+	let describeName: string | undefined;
+	if (result.name && result.name.includes('`') && result.name.includes('→')) {
+		// Format: `Describe Name` → `Nested Describe` → test name
+		// Extract the first describe name (without backticks)
+		const parts = result.name.split('→');
+		if (parts.length > 1) {
+			describeName = parts[0].trim().replace(/`/g, '').trim();
+			// Track describes found during file/suite execution
+			if ((currentExecutionContext.type === 'file' || currentExecutionContext.type === 'suite') && describeName) {
+				currentExecutionContext.describesInExecution.add(describeName);
+			}
 		}
 	}
+
+	// Force log these for debugging (not using logDebug to ensure they appear)
+	log(`[handleTeamcityEvent] Test File: ${testFile}`);
+	log(`[handleTeamcityEvent] Test Name: "${testName}"`);
+	log(`[handleTeamcityEvent] Original Name from Teamcity: "${result.name}"`);
+	log(`[handleTeamcityEvent] Extracted Name: "${testInfo?.testName || 'N/A'}"`);
+	log(`[handleTeamcityEvent] Describe Name: "${describeName || 'N/A'}"`);
+
+	switch (result.event) {
+		case TeamcityEvent.testStarted:
+			logResult(`▶️  Running: ${testName}`, 'running');
+			testResultsManager.setTestResult(testFile, testName, 'running', result.line || 0, 'test', 0, undefined, undefined, flowId, describeName);
+			cache.set(flowId, result);
+			// Update UI immediately
+			codeLensProvider.refresh();
+			updateTestDecorations();
+			break;
+
+		case TeamcityEvent.testFinished:
+			const startedTest = cache.get(flowId);
+			const durationMs = result.duration || 0;
+			const durationSec = durationMs / 1000; // Convert ms to seconds
+
+			// Check if test failed (will be in cache from testFailed event)
+			const failedTest = cache.get(flowId);
+			if (failedTest && 'message' in failedTest) {
+				// Already handled by testFailed
+				logResult(`❌ Failed: ${testName} (${formatTeamcityDuration(durationMs)})`, 'failed');
+			} else {
+				logResult(`✅ Passed: ${testName} (${formatTeamcityDuration(durationMs)})`, 'passed');
+				testResultsManager.setTestResult(testFile, testName, 'passed', result.line || 0, 'test', durationSec, undefined, undefined, flowId, describeName);
+			}
+
+			cache.delete(flowId);
+			// Update UI immediately
+			codeLensProvider.refresh();
+			updateTestDecorations();
+			break;
+
+		case TeamcityEvent.testFailed:
+			logResult(`❌ FAILED: ${testName}`, 'failed');
+			log(`   Message: ${result.message || 'No message'}`);
+			if (result.details) {
+				// Format details nicely
+				const details = result.details.split('|n').join('\n   ');
+				log(`   Details:\n   ${details}`);
+			}
+
+			// Convert duration from milliseconds to seconds
+			const failedDurationSec = result.duration ? result.duration / 1000 : undefined;
+			testResultsManager.setTestResult(testFile, testName, 'failed', result.line || 0, 'test', failedDurationSec, result.message, result.details, flowId, describeName);
+
+			// Store in cache for testFinished handler
+			cache.set(flowId, result);
+
+			// Update UI immediately
+			codeLensProvider.refresh();
+			updateTestDecorations();
+			break;
+
+		case TeamcityEvent.testIgnored:
+			logResult(`🟡 SKIPPED: ${testName}`, 'skipped');
+			if (result.message) {
+				log(`   Reason: ${result.message}`);
+			}
+
+			testResultsManager.setTestResult(testFile, testName, 'skipped', result.line || 0, 'test', undefined, result.message, undefined, flowId, describeName);
+			cache.delete(flowId);
+
+			// Update UI immediately
+			codeLensProvider.refresh();
+			updateTestDecorations();
+			break;
+
+		case TeamcityEvent.testCount:
+			if (result.count) {
+				log(`📊 Total tests to run: ${result.count}`);
+			}
+			break;
+
+		case TeamcityEvent.testSuiteStarted:
+			logDebug(`Test suite started: ${result.name}`);
+			// If running a describe group, mark it as running
+			if (currentExecutionContext.type === 'describe' && currentExecutionContext.describeName) {
+				testResultsManager.setTestResult(
+					testFile,
+					currentExecutionContext.describeName,
+					'running',
+					0,
+					'describe',
+					undefined,
+					undefined,
+					undefined,
+					flowId
+				);
+				codeLensProvider.refresh();
+			}
+			break;
+
+		case TeamcityEvent.testSuiteFinished:
+			logDebug(`Test suite finished: ${result.name}`);
+			// If running a describe group, calculate and store its status
+			if (currentExecutionContext.type === 'describe' && currentExecutionContext.describeName) {
+				const describeStatus = testResultsManager.calculateDescribeStatus(testFile, currentExecutionContext.describeName);
+				testResultsManager.setTestResult(
+					testFile,
+					currentExecutionContext.describeName,
+					describeStatus.status,
+					0,
+					'describe',
+					describeStatus.duration,
+					undefined,
+					undefined,
+					flowId
+				);
+				codeLensProvider.refresh();
+				updateTestDecorations();
+			}
+			// If running a file or suite, update all describes that were found during execution
+			else if ((currentExecutionContext.type === 'file' || currentExecutionContext.type === 'suite') &&
+				currentExecutionContext.describesInExecution.size > 0) {
+				for (const descName of currentExecutionContext.describesInExecution) {
+					const describeStatus = testResultsManager.calculateDescribeStatus(testFile, descName);
+					testResultsManager.setTestResult(
+						testFile,
+						descName,
+						describeStatus.status,
+						0,
+						'describe',
+						describeStatus.duration,
+						undefined,
+						undefined,
+						flowId
+					);
+				}
+				codeLensProvider.refresh();
+				updateTestDecorations();
+			}
+			break;
+	}
 }
+// XML parsing functions removed - now using Teamcity streaming format
+
 export function deactivate() { }

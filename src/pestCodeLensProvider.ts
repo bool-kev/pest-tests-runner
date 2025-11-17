@@ -1,17 +1,6 @@
 import * as vscode from 'vscode';
 import { TestResultsManager } from './testResultsManager';
-
-/**
- * Decode escaped characters in test/describe names
- * Converts: "nom avec l\'apostrophe" -> "nom avec l'apostrophe"
- * Converts: "nom avec \"quote" -> "nom avec "quote"
- */
-function decodeTestName(rawName: string): string {
-	return rawName
-		.replace(/\\'/g, "'")   // \' -> '
-		.replace(/\\"/g, '"')   // \" -> "
-		.replace(/\\\\/g, '\\'); // \\ -> \
-}
+import { parseTestsFromPhp, decodeTestName } from './phpAstParser';
 
 export class PestCodeLensProvider implements vscode.CodeLensProvider {
 	private _onDidChangeCodeLenses: vscode.EventEmitter<void> = new vscode.EventEmitter<void>();
@@ -37,7 +26,6 @@ export class PestCodeLensProvider implements vscode.CodeLensProvider {
 
 		const codeLenses: vscode.CodeLens[] = [];
 		const text = document.getText();
-		const lines = text.split('\n');
 
 		// File-level CodeLens with status
 		const fileResult = this.testResultsManager.getTestResult(document.uri.fsPath, '__FILE__');
@@ -48,39 +36,36 @@ export class PestCodeLensProvider implements vscode.CodeLensProvider {
 			arguments: []
 		}));
 
-		for (let i = 0; i < lines.length; i++) {
-			const line = lines[i];
-			// Match test names with proper quote handling:
-			// Regex explanation: (['"`]) captures opening quote, then:
-			// (?:[^'"`\\]|\\.)* matches either:
-			//   - [^'"`\\] any char except quotes or backslash
-			//   - \\. a backslash followed by any char (escaped character)
-			// This correctly handles: test('nom avec l\'apostrophe') or test("nom avec \"quote")
-			const testMatch = line.match(/^\s*(test|it)\s*\(\s*(['"`])((?:[^'"`\\]|\\.)*)\2/);
-			const describeMatch = line.match(/^\s*describe\s*\(\s*(['"`])((?:[^'"`\\]|\\.)*)\1/);
+		// Use AST parser to extract tests and describes
+		const parsedTests = parseTestsFromPhp(text);
 
-			if (testMatch) {
-				const rawTestName = testMatch[3]; // The captured test name with escapes
-				const testName = decodeTestName(rawTestName); // Decode escaped characters
-				const range = new vscode.Range(i, 0, i, line.length);
+		for (const parsedTest of parsedTests) {
+			const testName = decodeTestName(parsedTest.name);
+			const range = new vscode.Range(parsedTest.line, 0, parsedTest.line, text.split('\n')[parsedTest.line]?.length || 0);
+
+			if (parsedTest.type === 'describe') {
+				// For describe blocks, calculate status from child tests
+				const describeStatus = this.testResultsManager.getDescribeStatus(document.uri.fsPath, testName);
+				const title = describeStatus ? getTitleForStatus(describeStatus) : '$(play) Run Group';
+				console.log(`[CodeLensProvider] 🔍 Describe at line ${parsedTest.line + 1}: "${testName}"`);
+				console.log(`  Status: ${describeStatus?.status || 'none'}, Title: ${title}`);
+				codeLenses.push(new vscode.CodeLens(range, {
+					title,
+					command: 'pest-tests-runner.runDescribeGroup',
+					arguments: [testName, parsedTest.line]
+				}));
+			} else {
+				// For individual tests, get their stored result
 				const result = this.testResultsManager.getTestResult(document.uri.fsPath, testName);
+				// test or it
 				const title = result ? getTitleForStatus(result) : '$(play) Run';
-
-				console.log(`[CodeLensProvider] 🔍 Test at line ${i + 1}: "${testName}"`);
+				console.log(`[CodeLensProvider] 🔍 Test at line ${parsedTest.line + 1}: "${testName}"`);
 				console.log(`  Status: ${result?.status || 'none'}, Title: ${title}`);
-
-				codeLenses.push(new vscode.CodeLens(range, { title, command: 'pest-tests-runner.runTest', arguments: [testName, i] }));
-			} else if (describeMatch) {
-				const rawDescribeName = describeMatch[2]; // The captured describe name with escapes
-				const describeName = decodeTestName(rawDescribeName); // Decode escaped characters
-				const range = new vscode.Range(i, 0, i, line.length);
-				const result = this.testResultsManager.getTestResult(document.uri.fsPath, describeName);
-				const title = result ? getTitleForStatus(result) : '$(play) Run Group';
-
-				console.log(`[CodeLensProvider] 🔍 Describe at line ${i + 1}: "${describeName}"`);
-				console.log(`  Status: ${result?.status || 'none'}, Title: ${title}`);
-
-				codeLenses.push(new vscode.CodeLens(range, { title, command: 'pest-tests-runner.runDescribeGroup', arguments: [describeName, i] }));
+				codeLenses.push(new vscode.CodeLens(range, {
+					title,
+					command: 'pest-tests-runner.runTest',
+					arguments: [testName, parsedTest.line]
+				}));
 			}
 		}
 
@@ -96,7 +81,7 @@ export class PestCodeLensProvider implements vscode.CodeLensProvider {
 	}
 }
 
-function getTitleForStatus(result: { status: string; duration?: number }, label?: string): string {
+function getTitleForStatus(result: { status: string; duration?: number; message?: string }, label?: string): string {
 	const defaultLabel = label || 'Run';
 
 	// Format duration: show more precision for very fast tests (< 0.01s)
@@ -113,8 +98,9 @@ function getTitleForStatus(result: { status: string; duration?: number }, label?
 			// Use green circle emoji for visual color feedback
 			return `✅ Passed${result.duration !== undefined ? ` (${formatDuration(result.duration)})` : ''}`;
 		case 'failed':
-			// Use red X emoji for visual color feedback
-			return `❌ Failed${result.duration !== undefined ? ` (${formatDuration(result.duration)})` : ''}`;
+			// Show error message instead of duration for failed tests
+			const errorMsg = result.message ? `: ${result.message.substring(0, 60)}${result.message.length > 60 ? '...' : ''}` : '';
+			return `❌ Failed${errorMsg}`;
 		case 'running':
 			// Use hourglass emoji for running state
 			return `⏳ Running${label ? ` ${label}` : ''}...`;

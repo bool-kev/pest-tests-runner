@@ -2,6 +2,56 @@
 
 All notable changes to the "Pest Tests Runner" extension will be documented in this file.
 
+## [0.2.0] - 2025-01-XX
+
+### 🚀 Major Architecture Upgrade - Real-Time Streaming
+
+#### Breaking Changes
+
+- **Removed `fast-xml-parser` dependency** - no longer using JUnit XML format
+- Requires Pest with `--teamcity` flag support (Pest 2.x+)
+
+#### Added
+
+- ✨ **Real-time streaming** with Teamcity format - see test results as they execute
+  - Instant feedback during test runs (no waiting for XML generation)
+  - Progress tracking - watch tests transition from Running → Passed/Failed
+  - Live updates to CodeLens status and inline decorations
+- 🎯 **AST parsing** with `php-parser` for reliable test detection
+  - Handles complex test names (apostrophes, quotes, emojis, special characters)
+  - Detects deeply nested describe blocks (3+ levels)
+  - Supports string concatenation in test names (`test('prefix ' . 'suffix')`)
+  - More robust than regex-based parsing
+- 📊 **Detailed error messages** for failed tests
+  - Full stack traces displayed in Output Channel
+  - Formatted error details (escape sequences properly handled)
+  - File and line number highlighting
+- 🟡 **Skip reasons** displayed for skipped tests
+  - Shows why a test was skipped
+  - Clear visual indication with yellow circle emoji
+
+#### Changed
+
+- **Test execution** now uses `spawn` with stdout streaming instead of `exec` with XML batch processing
+- **Command args** changed from `--log-junit` to `--teamcity`
+- **Test detection** migrated from regex to AST parsing in `pestCodeLensProvider.ts`
+- **Helper functions** `extractTestNamesFromFile()` and `extractTestNamesFromDescribe()` refactored to use AST
+
+#### Performance
+
+- ⚡ **Instant feedback** - results appear as tests run (vs waiting for completion)
+- 🚀 **No XML overhead** - eliminates XML file generation and parsing delay
+- 📈 **Better UX** - progressive disclosure of test results
+
+#### Technical Details
+
+- Added `src/teamcityParser.ts` (~130 lines) for parsing Teamcity format
+- Added `src/phpAstParser.ts` (~160 lines) for AST-based test detection
+- Refactored `executeTestCommand()` in `extension.ts` to use streaming
+- Implemented `handleTeamcityEvent()` for real-time event processing
+- Uses `Map<flowId, TeamcityResult>` cache for correlating events
+- Removed all JUnit XML parsing code (~300+ lines)
+
 ## [0.1.6] - 2025-10-27
 
 ### 🎨 Visual Improvements & Rebranding

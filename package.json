@@ -1,8 +1,8 @@
 {
   "name": "pest-tests-runner",
   "displayName": "Pest Tests Runner",
-  "description": "Elegant Pest PHP testing framework runner with inline status indicators, CodeLens actions, and real-time colored test results directly in your editor",
-  "version": "0.1.6",
+  "description": "Elegant Pest PHP testing framework runner with real-time streaming, inline status indicators, CodeLens actions, and instant visual feedback directly in your editor",
+  "version": "0.2.0",
   "publisher": "dark-shadow",
   "author": {
     "name": "dark SHADOW",
@@ -129,6 +129,6 @@
     "typescript": "^5.9.3"
   },
   "dependencies": {
-    "fast-xml-parser": "^5.3.0"
+    "php-parser": "^3.2.5"
   }
 }

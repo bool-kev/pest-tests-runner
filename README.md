@@ -1,14 +1,34 @@
 # Pest Tests Runner 🐛✨
 
-Run your Pest PHP tests directly from VS Code with inline status indicators and instant visual feedback.
+Run your Pest PHP tests directly from VS Code with **real-time streaming**, inline status indicators, and instant visual feedback.
 
-## Features
+## ✨ Features
+
+### 🚀 Real-Time Test Execution (NEW)
+
+- **Streaming results** - see tests pass/fail as they run (no waiting!)
+- **Instant feedback** with Teamcity format streaming
+- **Progress tracking** - watch your test suite execute in real-time
+
+### 🎯 Smart Test Detection
+
+- **AST parsing** with php-parser for reliable test detection
+- Handles complex test names with apostrophes, quotes, emojis, special characters
+- Detects deeply nested describe blocks (3+ levels)
+- Supports string concatenation in test names
+
+### 📊 Rich Test Results
 
 - **Click-to-run CodeLens** on every test, describe group, and file
 - **Colored status indicators**: ✅ Pass (green) | ❌ Fail (red) | 🟡 Skip (yellow) | ⏳ Running (blue)
-- **Inline results** displayed at end of test lines
-- **Smart tracking** - results persist across sessions
+- **Detailed error messages** with stack traces for failed tests
+- **Skip reasons** displayed for skipped tests
+- **Inline results** with precise execution time (0.0023s)
+
+### 💪 Developer Experience
+
 - **Auto-save** before test execution
+- **Smart tracking** - results persist across sessions
 - **Cross-platform** - Windows/Linux/Mac compatible
 
 ## Quick Start
@@ -49,6 +69,28 @@ Run your Pest PHP tests directly from VS Code with inline status indicators and 
 Set custom path: `"pest-tests-runner.pestBinaryPath": "php vendor/pestphp/pest/bin/pest"`
 
 ## Release Notes
+
+### 0.2.0 (Latest) - Major Architecture Upgrade 🚀
+
+**Breaking Changes:**
+
+- Removed `fast-xml-parser` dependency
+- Requires Pest with `--teamcity` flag support
+
+**New Features:**
+
+- ✨ **Real-time streaming** with Teamcity format - see results as tests run
+- 🎯 **AST parsing** with php-parser for reliable test detection
+- 📊 **Detailed error messages** with formatted stack traces
+- 🟡 **Skip reasons** displayed for skipped tests
+- ⚡ **Performance improvement** - instant feedback instead of waiting for XML
+
+**Improvements:**
+
+- Handles complex test names (apostrophes, quotes, emojis, special chars)
+- Detects deeply nested describe blocks (3+ levels)
+- Supports string concatenation in test names
+- Better error handling and logging
 
 ### 0.1.6
 

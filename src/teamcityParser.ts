@@ -172,9 +172,6 @@ export function extractTestId(result: TeamcityResult): { file: string; testName:
             .replace(/^it\s+/, '')
             .replace(/^test\s+/, '')
             .trim();
-
-        console.log(`[extractTestId] Original: "${originalTestName}"`);
-        console.log(`[extractTestId] Extracted: "${testName}"`);
     }
 
     return { file, testName };

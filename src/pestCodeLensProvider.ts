@@ -1,17 +1,19 @@
 import * as vscode from 'vscode';
 import { TestResultsManager } from './testResultsManager';
-import { parseTestsFromPhp, decodeTestName } from './phpAstParser';
+import { parseTestsFromPhp, decodeTestName, ParsedTest } from './phpAstParser';
+import { LRUCache } from './utils/throttle';
 
 export class PestCodeLensProvider implements vscode.CodeLensProvider {
 	private _onDidChangeCodeLenses: vscode.EventEmitter<void> = new vscode.EventEmitter<void>();
 	public readonly onDidChangeCodeLenses: vscode.Event<void> = this._onDidChangeCodeLenses.event;
+	// LRU cache limited to 20 files to prevent memory bloat
+	private cache = new LRUCache<string, { version: number; tests: ParsedTest[] }>(20);
 
 	constructor(private testResultsManager: TestResultsManager) {
 		vscode.workspace.onDidChangeConfiguration(() => this._onDidChangeCodeLenses.fire());
 	}
 
 	public refresh(): void {
-		console.log('[CodeLensProvider] 🔄 Refresh triggered');
 		this._onDidChangeCodeLenses.fire();
 	}
 
@@ -36,8 +38,18 @@ export class PestCodeLensProvider implements vscode.CodeLensProvider {
 			arguments: []
 		}));
 
-		// Use AST parser to extract tests and describes
-		const parsedTests = parseTestsFromPhp(text);
+		// Check cache to avoid re-parsing AST if document hasn't changed
+		const cacheKey = document.uri.toString();
+		const cached = this.cache.get(cacheKey);
+		let parsedTests: ParsedTest[];
+
+		if (cached && cached.version === document.version) {
+			parsedTests = cached.tests;
+		} else {
+			// Use AST parser to extract tests and describes
+			parsedTests = parseTestsFromPhp(text);
+			this.cache.set(cacheKey, { version: document.version, tests: parsedTests });
+		}
 
 		for (const parsedTest of parsedTests) {
 			const testName = decodeTestName(parsedTest.name);
@@ -47,8 +59,7 @@ export class PestCodeLensProvider implements vscode.CodeLensProvider {
 				// For describe blocks, calculate status from child tests
 				const describeStatus = this.testResultsManager.getDescribeStatus(document.uri.fsPath, testName);
 				const title = describeStatus ? getTitleForStatus(describeStatus) : '$(play) Run Group';
-				console.log(`[CodeLensProvider] 🔍 Describe at line ${parsedTest.line + 1}: "${testName}"`);
-				console.log(`  Status: ${describeStatus?.status || 'none'}, Title: ${title}`);
+
 				codeLenses.push(new vscode.CodeLens(range, {
 					title,
 					command: 'pest-tests-runner.runDescribeGroup',
@@ -59,8 +70,6 @@ export class PestCodeLensProvider implements vscode.CodeLensProvider {
 				const result = this.testResultsManager.getTestResult(document.uri.fsPath, testName);
 				// test or it
 				const title = result ? getTitleForStatus(result) : '$(play) Run';
-				console.log(`[CodeLensProvider] 🔍 Test at line ${parsedTest.line + 1}: "${testName}"`);
-				console.log(`  Status: ${result?.status || 'none'}, Title: ${title}`);
 				codeLenses.push(new vscode.CodeLens(range, {
 					title,
 					command: 'pest-tests-runner.runTest',

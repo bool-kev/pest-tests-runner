@@ -152,7 +152,7 @@ function updateTestDecorations() {
 				if (result.status === 'failed') {
 					const errorMessage = result.message || 'Test failed';
 					const hasSpecificErrorLine = result.line && result.line > 0 && result.line !== i + 1;
-					
+
 					if (hasSpecificErrorLine) {
 						// Show error on the specific line where it occurred
 						const errorLine = result.line! - 1; // Convert to 0-based index
@@ -215,6 +215,50 @@ function logDebug(message: string) {
 		const timestamp = new Date().toLocaleTimeString();
 		outputChannel.appendLine(`[${timestamp}] 🐛 ${message}`);
 	}
+}
+
+/**
+ * Extract error line number from stack trace if the test file appears in it
+ * @param details The stack trace/details from the error
+ * @param testFilePath The path of the test file being executed
+ * @returns The line number if found in stack, 0 otherwise (meaning show on test line)
+ */
+function extractErrorLineFromStack(details: string | undefined, testFilePath: string): number {
+	if (!details || !testFilePath) {
+		return 0;
+	}
+
+	// Normalize the test file path for comparison
+	const normalizedTestPath = testFilePath.replace(/\\/g, '/').toLowerCase();
+	const testFileName = normalizedTestPath.split('/').pop() || '';
+
+	// Split details into lines and search for the test file
+	const lines = details.split(/\|n|\n/);
+	
+	for (const line of lines) {
+		// Look for patterns like "at /path/to/file.php:123" or "file.php:123" or "/path/file.php on line 123"
+		const patterns = [
+			/([^\s]+\.php):(\d+)/i,  // file.php:123
+			/([^\s]+\.php)\s+on\s+line\s+(\d+)/i,  // file.php on line 123
+			/at\s+([^\s]+\.php):(\d+)/i,  // at file.php:123
+		];
+
+		for (const pattern of patterns) {
+			const match = line.match(pattern);
+			if (match) {
+				const foundPath = match[1].replace(/\\/g, '/').toLowerCase();
+				const lineNumber = parseInt(match[2], 10);
+
+				// Check if this file matches our test file (by full path or just filename)
+				if (foundPath.endsWith(testFileName) || normalizedTestPath.endsWith(foundPath) || foundPath === normalizedTestPath) {
+					return lineNumber;
+				}
+			}
+		}
+	}
+
+	// File not found in stack trace - return 0 to indicate error should be shown on test line
+	return 0;
 }
 
 /**
@@ -663,29 +707,29 @@ function handleTeamcityEvent(
 			updateTestDecorations();
 			break;
 
-	case TeamcityEvent.testFinished:
-		const startedTest = cache.get(flowId);
-		const durationMs = result.duration || 0;
-		const durationSec = durationMs / 1000; // Convert ms to seconds
+		case TeamcityEvent.testFinished:
+			const startedTest = cache.get(flowId);
+			const durationMs = result.duration || 0;
+			const durationSec = durationMs / 1000; // Convert ms to seconds
 
-		// Check if test failed (will be in cache from testFailed event)
-		const cachedTest = cache.get(flowId);
-		if (cachedTest && cachedTest.event === TeamcityEvent.testFailed) {
-			// Already handled by testFailed
-			logResult(`❌ Failed: ${testName} (${formatTeamcityDuration(durationMs)})`, 'failed');
-		} else if (cachedTest && cachedTest.event === TeamcityEvent.testIgnored) {
-			// Test was skipped - already handled by testIgnored
-			logResult(`🟡 Skipped: ${testName}`, 'skipped');
-		} else {
-			logResult(`✅ Passed: ${testName} (${formatTeamcityDuration(durationMs)})`, 'passed');
-			testResultsManager.setTestResult(testFile, testName, 'passed', result.line || 0, 'test', durationSec, undefined, undefined, flowId, describeName);
-		}
+			// Check if test failed (will be in cache from testFailed event)
+			const cachedTest = cache.get(flowId);
+			if (cachedTest && cachedTest.event === TeamcityEvent.testFailed) {
+				// Already handled by testFailed
+				logResult(`❌ Failed: ${testName} (${formatTeamcityDuration(durationMs)})`, 'failed');
+			} else if (cachedTest && cachedTest.event === TeamcityEvent.testIgnored) {
+				// Test was skipped - already handled by testIgnored
+				logResult(`🟡 Skipped: ${testName}`, 'skipped');
+			} else {
+				logResult(`✅ Passed: ${testName} (${formatTeamcityDuration(durationMs)})`, 'passed');
+				testResultsManager.setTestResult(testFile, testName, 'passed', result.line || 0, 'test', durationSec, undefined, undefined, flowId, describeName);
+			}
 
-		cache.delete(flowId);
-		// Update UI immediately
-		codeLensProvider.refresh();
-		updateTestDecorations();
-		break;		case TeamcityEvent.testFailed:
+			cache.delete(flowId);
+			// Update UI immediately
+			codeLensProvider.refresh();
+			updateTestDecorations();
+			break; case TeamcityEvent.testFailed:
 			logResult(`❌ FAILED: ${testName}`, 'failed');
 			log(`   Message: ${result.message || 'No message'}`);
 			if (result.details) {
@@ -694,9 +738,12 @@ function handleTeamcityEvent(
 				log(`   Details:\n   ${details}`);
 			}
 
+			// Extract error line from stack trace if the test file appears in it
+			let errorLine = extractErrorLineFromStack(result.details, testFile);
+
 			// Convert duration from milliseconds to seconds
 			const failedDurationSec = result.duration ? result.duration / 1000 : undefined;
-			testResultsManager.setTestResult(testFile, testName, 'failed', result.line || 0, 'test', failedDurationSec, result.message, result.details, flowId, describeName);
+			testResultsManager.setTestResult(testFile, testName, 'failed', errorLine, 'test', failedDurationSec, result.message, result.details, flowId, describeName);
 
 			// Store in cache for testFinished handler
 			cache.set(flowId, result);
@@ -706,21 +753,21 @@ function handleTeamcityEvent(
 			updateTestDecorations();
 			break;
 
-	case TeamcityEvent.testIgnored:
-		logResult(`🟡 SKIPPED: ${testName}`, 'skipped');
-		if (result.message) {
-			log(`   Reason: ${result.message}`);
-		}
+		case TeamcityEvent.testIgnored:
+			logResult(`🟡 SKIPPED: ${testName}`, 'skipped');
+			if (result.message) {
+				log(`   Reason: ${result.message}`);
+			}
 
-		testResultsManager.setTestResult(testFile, testName, 'skipped', result.line || 0, 'test', undefined, result.message, undefined, flowId, describeName);
-		
-		// Store in cache for testFinished handler (Pest sends testFinished even for skipped tests)
-		cache.set(flowId, result);
+			testResultsManager.setTestResult(testFile, testName, 'skipped', result.line || 0, 'test', undefined, result.message, undefined, flowId, describeName);
 
-		// Update UI immediately
-		codeLensProvider.refresh();
-		updateTestDecorations();
-		break;		case TeamcityEvent.testCount:
+			// Store in cache for testFinished handler (Pest sends testFinished even for skipped tests)
+			cache.set(flowId, result);
+
+			// Update UI immediately
+			codeLensProvider.refresh();
+			updateTestDecorations();
+			break; case TeamcityEvent.testCount:
 			if (result.count) {
 				log(`📊 Total tests to run: ${result.count}`);
 			}

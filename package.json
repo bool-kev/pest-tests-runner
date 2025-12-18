@@ -2,7 +2,7 @@
   "name": "pest-tests-runner",
   "displayName": "Pest Tests Runner",
   "description": "Elegant Pest PHP testing framework runner with real-time streaming, inline status indicators, CodeLens actions, and instant visual feedback directly in your editor",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "publisher": "dark-shadow",
   "author": {
     "name": "dark SHADOW",

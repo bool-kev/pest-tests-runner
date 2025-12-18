@@ -109,14 +109,8 @@ export function parseTeamcityLine(line: string): TeamcityResult | null {
         }
     }
 
-    // Extract file and line from details if present (for failures)
-    if (result.details) {
-        const detailsMatch = result.details.match(/at (.+?):(\d+)/);
-        if (detailsMatch) {
-            result.file = result.file || detailsMatch[1];
-            result.line = parseInt(detailsMatch[2], 10);
-        }
-    }
+    // Note: Line extraction from details is now handled in extension.ts
+    // where we have access to the current test file path for matching
 
     return result as TeamcityResult;
 }

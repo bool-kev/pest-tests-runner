@@ -62,49 +62,6 @@ export function throttle<T extends (...args: any[]) => void>(
 }
 
 /**
- * Debounce a function to execute only after `delay` milliseconds of inactivity
- */
-export function debounce<T extends (...args: any[]) => void>(
-    fn: T,
-    delay: number
-): T & { flush: () => void; cancel: () => void } {
-    let timeoutId: NodeJS.Timeout | undefined;
-    let lastArgs: Parameters<T> | undefined;
-
-    const debounced = ((...args: Parameters<T>) => {
-        lastArgs = args;
-
-        if (timeoutId) {
-            clearTimeout(timeoutId);
-        }
-
-        timeoutId = setTimeout(() => {
-            timeoutId = undefined;
-            fn(...args);
-        }, delay);
-    }) as T & { flush: () => void; cancel: () => void };
-
-    debounced.flush = () => {
-        if (timeoutId) {
-            clearTimeout(timeoutId);
-            timeoutId = undefined;
-            if (lastArgs) {
-                fn(...lastArgs);
-            }
-        }
-    };
-
-    debounced.cancel = () => {
-        if (timeoutId) {
-            clearTimeout(timeoutId);
-            timeoutId = undefined;
-        }
-    };
-
-    return debounced;
-}
-
-/**
  * Simple LRU Cache implementation
  */
 export class LRUCache<K, V> {

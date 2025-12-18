@@ -150,24 +150,6 @@ export function formatErrorMessage(message: string, maxLength: number = 100): st
 }
 
 /**
- * Format stack trace for hover display
- */
-export function formatStackTraceForHover(details: string): string {
-    if (!details) {
-        return '';
-    }
-
-    // Unescape Teamcity format
-    return details
-        .replace(/\|n/g, '\n')
-        .replace(/\|r/g, '\r')
-        .replace(/\|'/g, "'")
-        .replace(/\|\[/g, '[')
-        .replace(/\|\]/g, ']')
-        .replace(/\|\|/g, '|');
-}
-
-/**
  * Get status icon for display
  */
 export function getStatusIcon(status: TestStatus): string {
@@ -177,18 +159,5 @@ export function getStatusIcon(status: TestStatus): string {
         case 'skipped': return '🟡';
         case 'running': return '⏳';
         default: return '○';
-    }
-}
-
-/**
- * Get status color for theming
- */
-export function getStatusThemeColor(status: TestStatus): string {
-    switch (status) {
-        case 'passed': return 'testing.iconPassed';
-        case 'failed': return 'testing.iconFailed';
-        case 'skipped': return 'testing.iconSkipped';
-        case 'running': return 'testing.runAction';
-        default: return 'foreground';
     }
 }

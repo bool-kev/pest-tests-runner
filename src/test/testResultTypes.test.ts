@@ -4,10 +4,7 @@ import {
     extractErrorLineFromStackTrace,
     formatDuration,
     formatErrorMessage,
-    formatStackTraceForHover,
-    getStatusIcon,
-    getStatusThemeColor,
-    TestStatus
+    getStatusIcon
 } from '../utils/testResultTypes';
 
 suite('Test Result Types Test Suite', () => {
@@ -144,42 +141,6 @@ suite('Test Result Types Test Suite', () => {
         });
     });
 
-    suite('formatStackTraceForHover', () => {
-        test('returns empty string for empty input', () => {
-            assert.strictEqual(formatStackTraceForHover(''), '');
-        });
-
-        test('unescapes Teamcity newlines', () => {
-            const result = formatStackTraceForHover('line1|nline2');
-            assert.strictEqual(result, 'line1\nline2');
-        });
-
-        test('unescapes Teamcity carriage returns', () => {
-            const result = formatStackTraceForHover('line1|rline2');
-            assert.strictEqual(result, 'line1\rline2');
-        });
-
-        test('unescapes Teamcity apostrophes', () => {
-            const result = formatStackTraceForHover("test|'s value");
-            assert.strictEqual(result, "test's value");
-        });
-
-        test('unescapes Teamcity brackets', () => {
-            const result = formatStackTraceForHover('array|[0|]');
-            assert.strictEqual(result, 'array[0]');
-        });
-
-        test('unescapes Teamcity pipes', () => {
-            const result = formatStackTraceForHover('cmd || other');
-            assert.strictEqual(result, 'cmd | other');
-        });
-
-        test('handles all escapes together', () => {
-            const result = formatStackTraceForHover("line|ntest|'s |[value|]||end");
-            assert.strictEqual(result, "line\ntest's [value]|end");
-        });
-    });
-
     suite('getStatusIcon', () => {
         test('returns check for passed', () => {
             assert.strictEqual(getStatusIcon('passed'), '✅');
@@ -199,28 +160,6 @@ suite('Test Result Types Test Suite', () => {
 
         test('returns circle for none/unknown', () => {
             assert.strictEqual(getStatusIcon('none'), '○');
-        });
-    });
-
-    suite('getStatusThemeColor', () => {
-        test('returns correct color for passed', () => {
-            assert.strictEqual(getStatusThemeColor('passed'), 'testing.iconPassed');
-        });
-
-        test('returns correct color for failed', () => {
-            assert.strictEqual(getStatusThemeColor('failed'), 'testing.iconFailed');
-        });
-
-        test('returns correct color for skipped', () => {
-            assert.strictEqual(getStatusThemeColor('skipped'), 'testing.iconSkipped');
-        });
-
-        test('returns correct color for running', () => {
-            assert.strictEqual(getStatusThemeColor('running'), 'testing.runAction');
-        });
-
-        test('returns foreground for none', () => {
-            assert.strictEqual(getStatusThemeColor('none'), 'foreground');
         });
     });
 });

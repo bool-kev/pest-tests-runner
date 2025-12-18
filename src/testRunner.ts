@@ -6,7 +6,7 @@ import { TestResultsManager } from './testResultsManager';
 import { PestCodeLensProvider } from './pestCodeLensProvider';
 import { TestDecorationProvider } from './testDecorationProvider';
 import { parseTeamcityLine, TeamcityResult, TeamcityEvent } from './teamcityParser';
-import { parseTestsFromPhp, decodeTestName as astDecodeTestName } from './phpAstParser';
+import { decodeTestName as astDecodeTestName } from './phpAstParser';
 import { throttle } from './utils/throttle';
 import { parsePhpAsync } from './utils/astWorker';
 import {
@@ -168,8 +168,7 @@ export class TestRunner {
         this.testResultsManager.startBatch();
         try {
             if (testName && type === 'test') {
-                // Single test execution
-                this.logResult(`Running "${testName}"...`, 'running');
+                // Single test execution - status will be logged when testStarted event is received
                 this.testResultsManager.setTestResult(filePath, testName, 'running', 0, type);
             } else if (testName && type === 'describe') {
                 // Describe group execution - set all tests in group to running
@@ -451,19 +450,24 @@ export class TestRunner {
         testName: string,
         type: 'test' | 'describe' | 'file' | 'suite'
     ): Promise<void> {
-        // Find the Pest PHP script (not the .bat wrapper)
-        let pestPhpPath = path.join(workspaceFolder.uri.fsPath, 'vendor', 'pestphp', 'pest', 'bin', 'pest');
+        // The debugger needs the actual PHP script, not a .bat wrapper
+        let pestPhpPath: string;
+
+        if (pestBinary.endsWith('.bat')) {
+            // Windows .bat wrapper - use the PHP script instead (remove .bat)
+            pestPhpPath = path.join(workspaceFolder.uri.fsPath, 'vendor', 'bin', 'pest');
+        } else {
+            // Already a PHP script path - resolve to absolute
+            pestPhpPath = path.isAbsolute(pestBinary)
+                ? pestBinary
+                : path.join(workspaceFolder.uri.fsPath, pestBinary.replace(/^\.[\\/]/, ''));
+        }
 
         if (!fs.existsSync(pestPhpPath)) {
-            const vendorBinPest = path.join(workspaceFolder.uri.fsPath, 'vendor', 'bin', 'pest');
-            if (fs.existsSync(vendorBinPest) && !vendorBinPest.endsWith('.bat')) {
-                pestPhpPath = vendorBinPest;
-            } else {
-                vscode.window.showErrorMessage(
-                    'Could not find Pest binary for debugging. Please ensure "vendor/pestphp/pest/bin/pest" exists.'
-                );
-                return;
-            }
+            vscode.window.showErrorMessage(
+                `Could not find Pest binary for debugging at: ${pestPhpPath}. Check your "pest-tests-runner.pestBinaryPath" setting.`
+            );
+            return;
         }
 
         const debugConfig: vscode.DebugConfiguration = {
@@ -588,110 +592,4 @@ export class TestRunner {
         return testNames;
     }
 
-    // Keep sync versions for backward compatibility (used in other places)
-    private extractTestNamesFromFile(filePath: string): string[] {
-        const testNames: string[] = [];
-
-        try {
-            const content = fs.readFileSync(filePath, 'utf-8');
-
-            // Use AST parser for more reliable extraction
-            const parsedTests = parseTestsFromPhp(content);
-
-            for (const test of parsedTests) {
-                // Only include test() and it(), not describe()
-                if (test.type === 'test' || test.type === 'it') {
-                    const decodedName = astDecodeTestName(test.name);
-                    testNames.push(decodedName);
-                }
-            }
-        } catch (error) {
-            this.log(`Error reading file: ${error}`);
-        }
-
-        return testNames;
-    }
-
-    private extractTestNamesFromDescribe(filePath: string, describeName: string): string[] {
-        const testNames: string[] = [];
-
-        try {
-            const content = fs.readFileSync(filePath, 'utf-8');
-
-            // Use AST parser
-            const parsedTests = parseTestsFromPhp(content);
-
-            // Find the describe block with matching name
-            let describeLineNumber = -1;
-            let nextDescribeLineNumber = Number.MAX_SAFE_INTEGER;
-
-            for (const test of parsedTests) {
-                if (test.type === 'describe') {
-                    const decodedName = astDecodeTestName(test.name);
-                    if (decodedName === describeName && describeLineNumber === -1) {
-                        // Found our target describe
-                        describeLineNumber = test.line;
-                    } else if (describeLineNumber !== -1 && test.line > describeLineNumber) {
-                        // Found next describe after our target - this is the boundary
-                        nextDescribeLineNumber = test.line;
-                        break;
-                    }
-                }
-            }
-
-            // If we found the describe, extract all tests between it and the next describe
-            if (describeLineNumber !== -1) {
-                for (const test of parsedTests) {
-                    if ((test.type === 'test' || test.type === 'it') &&
-                        test.line > describeLineNumber &&
-                        test.line < nextDescribeLineNumber) {
-                        const decodedName = astDecodeTestName(test.name);
-                        testNames.push(decodedName);
-                    }
-                }
-            }
-        } catch (error) {
-            this.log(`Error reading file: ${error}`);
-        }
-
-        return testNames;
-    }
-
-    private extractErrorLineFromStack(details: string | undefined, testFilePath: string): number {
-        if (!details || !testFilePath) {
-            return 0;
-        }
-
-        // Normalize the test file path for comparison
-        const normalizedTestPath = testFilePath.replace(/\\/g, '/').toLowerCase();
-        const testFileName = normalizedTestPath.split('/').pop() || '';
-
-        // Split details into lines and search for the test file
-        const lines = details.split(/\|n|\n/);
-
-        for (const line of lines) {
-            // Look for patterns like "at /path/to/file.php:123" or "file.php:123" or "/path/file.php on line 123"
-            const patterns = [
-                /([^\s]+\.php):(\d+)/i,  // file.php:123
-                /([^\s]+\.php)\s+on\s+line\s+(\d+)/i,  // file.php on line 123
-                /at\s+([^\s]+\.php):(\d+)/i,  // at file.php:123
-            ];
-
-            for (const pattern of patterns) {
-                const match = line.match(pattern);
-                if (match) {
-                    const foundPath = match[1].replace(/\\/g, '/').toLowerCase();
-                    const lineNumber = parseInt(match[2], 10);
-
-                    // Check if this file matches our test file (by full path or just filename)
-                    if (foundPath.endsWith(testFileName) || normalizedTestPath.endsWith(foundPath) || foundPath === normalizedTestPath) {
-                        return lineNumber;
-                    }
-                }
-            }
-        }
-
-        // File not found in stack trace - return 0 to indicate error should be shown on test line
-        return 0;
-    }
 }

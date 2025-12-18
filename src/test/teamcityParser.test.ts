@@ -1,5 +1,5 @@
 import * as assert from 'assert';
-import { parseTeamcityLine, TeamcityEvent, extractTestId, formatDuration } from '../teamcityParser';
+import { parseTeamcityLine, TeamcityEvent } from '../teamcityParser';
 
 suite('Teamcity Parser Test Suite', () => {
 
@@ -139,95 +139,6 @@ suite('Teamcity Parser Test Suite', () => {
             assert.strictEqual(result?.details, 'stack');
             assert.strictEqual(result?.flowId, 99);
             assert.strictEqual(result?.duration, 100);
-        });
-    });
-
-    suite('extractTestId', () => {
-        test('extracts from locationHint', () => {
-            const result = extractTestId({
-                event: TeamcityEvent.testStarted,
-                locationHint: 'pest_qn:///path/to/test.php::testName'
-            });
-            assert.ok(result);
-            assert.strictEqual(result?.file, '/path/to/test.php');
-            assert.strictEqual(result?.testName, 'testName');
-        });
-
-        test('extracts from file and name', () => {
-            const result = extractTestId({
-                event: TeamcityEvent.testStarted,
-                file: '/path/to/test.php',
-                name: 'myTest'
-            });
-            assert.ok(result);
-            assert.strictEqual(result?.file, '/path/to/test.php');
-            assert.strictEqual(result?.testName, 'myTest');
-        });
-
-        test('extracts test name from hierarchical format', () => {
-            const result = extractTestId({
-                event: TeamcityEvent.testStarted,
-                locationHint: 'pest_qn:///path/test.php::`Describe` → it should work'
-            });
-            assert.ok(result);
-            assert.strictEqual(result?.testName, 'should work');
-        });
-
-        test('handles it prefix removal', () => {
-            const result = extractTestId({
-                event: TeamcityEvent.testStarted,
-                locationHint: 'pest_qn:///test.php::`Group` → it does something'
-            });
-            assert.ok(result);
-            assert.strictEqual(result?.testName, 'does something');
-        });
-
-        test('handles test prefix removal', () => {
-            const result = extractTestId({
-                event: TeamcityEvent.testStarted,
-                locationHint: 'pest_qn:///test.php::`Group` → test something'
-            });
-            assert.ok(result);
-            assert.strictEqual(result?.testName, 'something');
-        });
-
-        test('returns null for empty result', () => {
-            const result = extractTestId({
-                event: TeamcityEvent.testStarted
-            });
-            assert.strictEqual(result, null);
-        });
-
-        test('uses name field as fallback', () => {
-            const result = extractTestId({
-                event: TeamcityEvent.testFinished,
-                name: 'simple test'
-            });
-            assert.ok(result);
-            assert.strictEqual(result?.testName, 'simple test');
-            assert.strictEqual(result?.file, '');
-        });
-    });
-
-    suite('formatDuration', () => {
-        test('formats very small durations', () => {
-            const result = formatDuration(5);
-            assert.strictEqual(result, '0.0050s');
-        });
-
-        test('formats sub-second durations', () => {
-            const result = formatDuration(250);
-            assert.strictEqual(result, '0.250s');
-        });
-
-        test('formats seconds', () => {
-            const result = formatDuration(1500);
-            assert.strictEqual(result, '1.50s');
-        });
-
-        test('formats large durations', () => {
-            const result = formatDuration(5000);
-            assert.strictEqual(result, '5.00s');
         });
     });
 });

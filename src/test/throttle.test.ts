@@ -1,5 +1,5 @@
 import * as assert from 'assert';
-import { throttle, debounce, LRUCache } from '../utils/throttle';
+import { throttle, LRUCache } from '../utils/throttle';
 
 suite('Throttle Utilities Test Suite', () => {
 
@@ -79,81 +79,6 @@ suite('Throttle Utilities Test Suite', () => {
                 fn(); // Should execute immediately after delay
                 fn.cancel();
                 assert.strictEqual(callCount, 2);
-                done();
-            }, 60);
-        });
-    });
-
-    suite('debounce', () => {
-        test('delays execution until inactivity period', (done) => {
-            let callCount = 0;
-            const fn = debounce(() => { callCount++; }, 50);
-
-            fn();
-            assert.strictEqual(callCount, 0); // Not executed yet
-
-            setTimeout(() => {
-                assert.strictEqual(callCount, 1);
-                done();
-            }, 60);
-        });
-
-        test('resets timer on each call', (done) => {
-            let callCount = 0;
-            const fn = debounce(() => { callCount++; }, 50);
-
-            fn();
-            setTimeout(() => fn(), 30); // Reset timer
-            setTimeout(() => fn(), 60); // Reset timer again
-
-            setTimeout(() => {
-                // Should only execute once after last call + delay
-                fn.cancel();
-                done();
-            }, 150);
-        });
-
-        test('flush executes pending call immediately', (done) => {
-            let callCount = 0;
-            let lastValue = '';
-            const fn = debounce((value: string) => {
-                callCount++;
-                lastValue = value;
-            }, 100);
-
-            fn('test');
-            assert.strictEqual(callCount, 0);
-
-            fn.flush();
-
-            assert.strictEqual(callCount, 1);
-            assert.strictEqual(lastValue, 'test');
-            done();
-        });
-
-        test('cancel prevents pending call', (done) => {
-            let callCount = 0;
-            const fn = debounce(() => { callCount++; }, 50);
-
-            fn();
-            fn.cancel();
-
-            setTimeout(() => {
-                assert.strictEqual(callCount, 0);
-                done();
-            }, 60);
-        });
-
-        test('uses last arguments when debounced', (done) => {
-            let lastValue = '';
-            const fn = debounce((value: string) => { lastValue = value; }, 50);
-
-            fn('first');
-            fn('second');
-            fn('third');
-
-            setTimeout(() => {
-                assert.strictEqual(lastValue, 'third');
                 done();
             }, 60);
         });

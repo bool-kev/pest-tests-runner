@@ -59,24 +59,3 @@ export async function parsePhpAsync(content: string, cacheKey?: string): Promise
         });
     });
 }
-
-/**
- * Clear the parse cache for a specific file or all files
- */
-export function clearParseCache(cacheKey?: string): void {
-    if (cacheKey) {
-        parseCache.delete(cacheKey);
-    } else {
-        parseCache.clear();
-    }
-}
-
-/**
- * Get cache statistics
- */
-export function getCacheStats(): { size: number; keys: string[] } {
-    return {
-        size: parseCache.size,
-        keys: Array.from(parseCache.keys())
-    };
-}

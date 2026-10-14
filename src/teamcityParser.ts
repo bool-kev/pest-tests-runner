@@ -11,6 +11,8 @@ export enum TeamcityEvent {
     testFailed = 'testFailed',
     testIgnored = 'testIgnored',
     testCount = 'testCount',
+    testStdOut = 'testStdOut',
+    testStdErr = 'testStdErr',
 }
 
 export interface TeamcityResult {
@@ -20,39 +22,44 @@ export interface TeamcityResult {
     duration?: number;
     message?: string;
     details?: string;
+    /** File part of locationHint, relative to the project root as printed by Pest (may use `\` on Windows) */
     file?: string;
+    /** Description part of locationHint (full Pest description, including any dataset suffix) */
+    description?: string;
     line?: number;
     locationHint?: string;
     count?: number;
+    /** `comparisonFailure` when Pest provides expected/actual values */
+    type?: string;
+    expected?: string;
+    actual?: string;
+    /** Output of testStdOut / testStdErr */
+    out?: string;
 }
+
+const LOCATION_PREFIX = 'pest_qn://';
+const DATASET_SEPARATOR = ' with data set ';
+const NUMERIC_KEYS = new Set(['duration', 'flowId', 'count']);
+const UNESCAPES: Record<string, string> = { n: '\n', r: '\r', "'": "'", '[': '[', ']': ']', '|': '|' };
 
 /**
  * Parse a single Teamcity format line
  * Format: ##teamcity[eventName key='value' key2='value2']
  */
 export function parseTeamcityLine(line: string): TeamcityResult | null {
-    // Trim the line first to remove any whitespace
     line = line.trim();
 
-    // Match ##teamcity[...] - use greedy match and allow any content inside
-    const teamcityPattern = /^##teamcity\[(\w+)(.+)\]$/;
-    const match = line.match(teamcityPattern);
-
+    const match = /^##teamcity\[(\w+)(.*)\]$/.exec(line);
     if (!match) {
         return null;
     }
 
-    const eventName = match[1];
+    const result: Record<string, unknown> = { event: match[1] };
     const attributes = match[2];
 
-    // Parse attributes manually to handle Teamcity escaping properly
-    // Teamcity escapes: |' (apostrophe), |n (newline), |r (carriage return), || (pipe), |[ |]
-    const result: any = { event: eventName };
-
-    // Parse key='value' pairs, where value can contain |' (escaped apostrophe)
+    // Parse key='value' pairs; values may contain Teamcity escapes (|', |n, ||, |[, |])
     let i = 0;
     while (i < attributes.length) {
-        // Skip whitespace
         while (i < attributes.length && /\s/.test(attributes[i])) {
             i++;
         }
@@ -60,7 +67,6 @@ export function parseTeamcityLine(line: string): TeamcityResult | null {
             break;
         }
 
-        // Read key
         let key = '';
         while (i < attributes.length && /\w/.test(attributes[i])) {
             key += attributes[i++];
@@ -71,15 +77,13 @@ export function parseTeamcityLine(line: string): TeamcityResult | null {
             i++;
         }
 
-        // Read value until we find a ' that's not part of |'
+        // Read value until the closing quote, keeping escape sequences intact
         let value = '';
         while (i < attributes.length) {
             if (attributes[i] === "'") {
-                // Found closing quote
                 i++;
                 break;
             } else if (attributes[i] === '|' && i + 1 < attributes.length) {
-                // Escape sequence - include both characters
                 value += attributes[i] + attributes[i + 1];
                 i += 2;
             } else {
@@ -88,43 +92,42 @@ export function parseTeamcityLine(line: string): TeamcityResult | null {
         }
 
         if (key) {
-            // Unescape Teamcity special characters
-            let unescapedValue: any = unescapeTeamcityValue(value);
-
-            // Convert numeric values
-            if (key === 'duration' || key === 'flowId' || key === 'count') {
-                unescapedValue = parseInt(unescapedValue, 10);
-            }
-
-            result[key] = unescapedValue;
+            const unescaped = unescapeTeamcityValue(value);
+            result[key] = NUMERIC_KEYS.has(key) ? parseInt(unescaped, 10) : unescaped;
         }
     }
 
-    // Extract file and line from locationHint if present
-    if (result.locationHint) {
-        const locationMatch = result.locationHint.match(/pest_qn:\/\/(.+?)::(.+)$/);
-        if (locationMatch) {
-            result.file = locationMatch[1];
-            result.testName = locationMatch[2];
+    // locationHint: pest_qn://<relative file>::<description>
+    // The description itself may contain "::", so split on the first occurrence only.
+    const hint = result.locationHint;
+    if (typeof hint === 'string' && hint.startsWith(LOCATION_PREFIX)) {
+        const location = hint.slice(LOCATION_PREFIX.length);
+        const separator = location.indexOf('::');
+        if (separator === -1) {
+            result.file = location;
+        } else {
+            result.file = location.slice(0, separator);
+            result.description = location.slice(separator + 2);
         }
     }
 
-    // Note: Line extraction from details is now handled in extension.ts
-    // where we have access to the current test file path for matching
-
-    return result as TeamcityResult;
+    return result as unknown as TeamcityResult;
 }
 
 /**
- * Unescape Teamcity special characters
- * Teamcity uses |x notation for escaping
+ * Strip the dataset suffix Pest appends to test descriptions
+ * e.g. 'it adds with data set "(1, 2)"' -> 'it adds'
+ */
+export function stripDatasetSuffix(description: string): string {
+    // Same rule as Pest's Converter (Str::beforeLast)
+    const index = description.lastIndexOf(DATASET_SEPARATOR);
+    return index === -1 ? description : description.slice(0, index);
+}
+
+/**
+ * Unescape Teamcity special characters in a single pass
+ * (a multi-pass replace would turn "||n" into "|" + newline)
  */
 function unescapeTeamcityValue(value: string): string {
-    return value
-        .replace(/\|n/g, '\n')
-        .replace(/\|r/g, '\r')
-        .replace(/\|'/g, "'")
-        .replace(/\|\[/g, '[')
-        .replace(/\|\]/g, ']')
-        .replace(/\|\|/g, '|');
+    return value.replace(/\|(.)/g, (whole, char: string) => UNESCAPES[char] ?? whole);
 }

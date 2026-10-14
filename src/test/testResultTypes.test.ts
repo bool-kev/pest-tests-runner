@@ -1,6 +1,5 @@
 import * as assert from 'assert';
 import {
-    parseTeamcityTestName,
     extractErrorLineFromStackTrace,
     formatDuration,
     formatErrorMessage,
@@ -8,36 +7,6 @@ import {
 } from '../utils/testResultTypes';
 
 suite('Test Result Types Test Suite', () => {
-
-    suite('parseTeamcityTestName', () => {
-        test('parses simple test name without hierarchy', () => {
-            const result = parseTeamcityTestName('simple test');
-            assert.strictEqual(result.testName, 'simple test');
-            assert.deepStrictEqual(result.describePath, []);
-        });
-
-        test('parses test with single describe block', () => {
-            const result = parseTeamcityTestName('`Describe Block` → it should work');
-            assert.strictEqual(result.testName, 'should work');
-            assert.deepStrictEqual(result.describePath, ['Describe Block']);
-        });
-
-        test('parses test with nested describe blocks', () => {
-            const result = parseTeamcityTestName('`Outer` → `Inner` → it does something');
-            assert.strictEqual(result.testName, 'does something');
-            assert.deepStrictEqual(result.describePath, ['Outer', 'Inner']);
-        });
-
-        test('handles test prefix removal', () => {
-            const result = parseTeamcityTestName('`Group` → test my test name');
-            assert.strictEqual(result.testName, 'my test name');
-        });
-
-        test('handles it prefix removal', () => {
-            const result = parseTeamcityTestName('`Group` → it should do something');
-            assert.strictEqual(result.testName, 'should do something');
-        });
-    });
 
     suite('extractErrorLineFromStackTrace', () => {
         test('extracts line from standard PHP format', () => {
@@ -78,6 +47,24 @@ suite('Test Result Types Test Suite', () => {
         test('returns 0 for empty test file path', () => {
             const line = extractErrorLineFromStackTrace('TestFile.php:42', '');
             assert.strictEqual(line, 0);
+        });
+
+        test('matches relative Pest frames against the absolute test path', () => {
+            const stack = 'at tests\\Unit\\FormatTest.php:7';
+            const line = extractErrorLineFromStackTrace(stack, 'D:\\labs\\app\\tests\\Unit\\FormatTest.php');
+            assert.strictEqual(line, 7);
+        });
+
+        test('matches container paths (Docker / Sail)', () => {
+            const stack = 'Exception: boom|n|n/var/www/html/app/Models/User.php:10|n/var/www/html/tests/Feature/UserTest.php:25';
+            const line = extractErrorLineFromStackTrace(stack, 'D:\\projects\\shop\\tests\\Feature\\UserTest.php');
+            assert.strictEqual(line, 25);
+        });
+
+        test('prefers the frame sharing the longest path suffix', () => {
+            const stack = 'vendor/acme/lib/tests/UserTest.php:3\ntests/Feature/UserTest.php:12';
+            const line = extractErrorLineFromStackTrace(stack, '/app/tests/Feature/UserTest.php');
+            assert.strictEqual(line, 12);
         });
 
         test('returns 0 when file not found in stack', () => {

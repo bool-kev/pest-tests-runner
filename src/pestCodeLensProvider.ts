@@ -1,15 +1,31 @@
 import * as vscode from 'vscode';
-import { TestResultsManager, FILE_RESULT_KEY } from './testResultsManager';
-import { decodeTestName } from './phpAstParser';
+import { ResultStore, StoredResult } from './testing/resultStore';
+import { PestTestController } from './testing/testController';
+import { fileItemId, normalizePath, testItemId } from './testing/testTree';
 import { formatDuration } from './utils/testResultTypes';
 import { parsePhpCached } from './utils/astWorker';
 
-export class PestCodeLensProvider implements vscode.CodeLensProvider {
+export class PestCodeLensProvider implements vscode.CodeLensProvider, vscode.Disposable {
 	private _onDidChangeCodeLenses: vscode.EventEmitter<void> = new vscode.EventEmitter<void>();
 	public readonly onDidChangeCodeLenses: vscode.Event<void> = this._onDidChangeCodeLenses.event;
+	private readonly disposables: vscode.Disposable[] = [];
 
-	constructor(private testResultsManager: TestResultsManager) {
-		vscode.workspace.onDidChangeConfiguration(() => this._onDidChangeCodeLenses.fire());
+	constructor(private store: ResultStore, private testController: PestTestController) {
+		this.disposables.push(
+			this._onDidChangeCodeLenses,
+			vscode.workspace.onDidChangeConfiguration(event => {
+				if (event.affectsConfiguration('pest-tests-runner')) {
+					this._onDidChangeCodeLenses.fire();
+				}
+			}),
+			// Results arrive already coalesced; only refresh when a visible editor is concerned
+			store.onDidChange(files => {
+				const visible = vscode.window.visibleTextEditors.some(editor => files.has(normalizePath(editor.document.uri.fsPath)));
+				if (visible) {
+					this._onDidChangeCodeLenses.fire();
+				}
+			})
+		);
 	}
 
 	public refresh(): void {
@@ -17,53 +33,50 @@ export class PestCodeLensProvider implements vscode.CodeLensProvider {
 	}
 
 	public provideCodeLenses(document: vscode.TextDocument): vscode.CodeLens[] {
-		const config = vscode.workspace.getConfiguration('pest-tests-runner');
-		if (!config.get<boolean>('enableCodeLens', true)) {
+		const config = vscode.workspace.getConfiguration('pest-tests-runner', document.uri);
+		if (!config.get<boolean>('enableCodeLens', true) || !this.testController.isTestDocument(document)) {
 			return [];
 		}
-		if (!this.isPestTestFile(document)) {
+
+		// Same cache key and version as test discovery: parsed once per document version
+		const parsedTests = parsePhpCached(document.getText(), document.uri.toString(), document.version);
+		if (parsedTests.length === 0) {
 			return [];
 		}
+
+		const file = document.uri.fsPath;
+		const allTestIds = parsedTests.filter(test => test.type !== 'describe').map(test => testItemId(file, test.pestId));
 
 		const codeLenses: vscode.CodeLens[] = [];
-		const text = document.getText();
-
-		// File-level CodeLens with status
-		const fileResult = this.testResultsManager.getTestResult(document.uri.fsPath, FILE_RESULT_KEY);
-		const fileTitle = fileResult ? getTitleForStatus(fileResult, 'File') : '$(play) Run File';
+		const fileResult = this.store.aggregate(allTestIds);
 		codeLenses.push(new vscode.CodeLens(new vscode.Range(0, 0, 0, 0), {
-			title: fileTitle,
+			title: fileResult ? getTitleForStatus(fileResult, 'File') : '$(play) Run File',
 			command: 'pest-tests-runner.runTestFile',
-			arguments: []
+			arguments: [fileItemId(file)]
 		}));
 
-		// Use centralized cache for AST parsing
-		const cacheKey = document.uri.toString();
-		const parsedTests = parsePhpCached(text, cacheKey, document.version);
-
 		for (const parsedTest of parsedTests) {
-			const testName = decodeTestName(parsedTest.name);
-			const range = new vscode.Range(parsedTest.line, 0, parsedTest.line, text.split('\n')[parsedTest.line]?.length || 0);
+			if (parsedTest.line >= document.lineCount) {
+				continue;
+			}
+			const range = document.lineAt(parsedTest.line).range;
+			const id = testItemId(file, parsedTest.pestId);
 
 			if (parsedTest.type === 'describe') {
-				// For describe blocks, calculate status from child tests
-				const describeStatus = this.testResultsManager.getDescribeStatus(document.uri.fsPath, testName);
-				const title = describeStatus ? getTitleForStatus(describeStatus) : '$(play) Run Group';
-
+				const prefix = `${id} → `;
+				const describeResult = this.store.aggregate(allTestIds.filter(testId => testId.startsWith(prefix)));
 				codeLenses.push(new vscode.CodeLens(range, {
-					title,
+					title: describeResult ? getTitleForStatus(describeResult, 'Group') : '$(play) Run Group',
 					command: 'pest-tests-runner.runDescribeGroup',
-					arguments: [testName, parsedTest.line]
+					arguments: [id]
 				}));
 			} else {
-				// For individual tests, get their stored result
-				const result = this.testResultsManager.getTestResult(document.uri.fsPath, testName);
-				// test or it
-				const title = result ? getTitleForStatus(result) : '$(play) Run';
+				const result = this.store.get(id);
 				codeLenses.push(new vscode.CodeLens(range, {
-					title,
+					title: result ? getTitleForStatus(result) : '$(play) Run',
+					tooltip: result?.message,
 					command: 'pest-tests-runner.runTest',
-					arguments: [testName, parsedTest.line]
+					arguments: [id]
 				}));
 			}
 		}
@@ -71,31 +84,29 @@ export class PestCodeLensProvider implements vscode.CodeLensProvider {
 		return codeLenses;
 	}
 
-	private isPestTestFile(document: vscode.TextDocument): boolean {
-		const filePath = document.uri.fsPath.toLowerCase();
-		return (
-			document.languageId === 'php' &&
-			(filePath.includes('/tests/') || filePath.includes('\\tests\\') || filePath.endsWith('test.php'))
-		);
+	public dispose(): void {
+		this.disposables.forEach(disposable => disposable.dispose());
 	}
 }
 
-function getTitleForStatus(result: { status: string; duration?: number; message?: string }, label?: string): string {
+function getTitleForStatus(result: StoredResult, label?: string): string {
 	const defaultLabel = label || 'Run';
+	const duration = result.duration !== undefined ? ` (${formatDuration(result.duration)})` : '';
 
 	switch (result.status) {
 		case 'passed':
-			// Use green circle emoji for visual color feedback
-			return `✅ Passed${result.duration !== undefined ? ` (${formatDuration(result.duration)})` : ''}`;
+			return `✅ Passed${duration}`;
 		case 'failed':
-			// Just show Failed status without message (message is shown inline on error line)
+			// Message itself is shown inline on the failing line by VS Code
 			return `❌ Failed`;
+		case 'errored':
+			return `❌ Error`;
 		case 'running':
-			// Use hourglass emoji for running state
 			return `⏳ Running${label ? ` ${label}` : ''}...`;
+		case 'queued':
+			return `⏳ Queued`;
 		case 'skipped':
-			// Use yellow circle emoji - more visible than ⊘
-			return `🟡 Skipped${result.duration !== undefined ? ` (${formatDuration(result.duration)})` : ''}`;
+			return `🟡 Skipped${duration}`;
 		default:
 			return `$(play) ${defaultLabel}`;
 	}

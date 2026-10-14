@@ -2,6 +2,48 @@
 
 All notable changes to the "Pest Tests Runner" extension will be documented in this file.
 
+## [0.5.0] - 2026-10-14
+
+### 🧪 Native VS Code testing
+
+#### Added
+
+- **Test Explorer and gutter icons** via the VS Code Testing API: projects, files, `describe` blocks, tests and dataset cases
+- **Diff view** (expected vs actual) for failed comparisons, and failure messages shown inline on the failing line
+- **Debug profile** (right-click → Debug Test) and the `Pest Tests Runner: Debug Test at Cursor` command
+- **Stop button**: cancelling a run kills Pest and its child processes
+- **Parent folders and monorepos**: the project root is detected from each test file; several projects run in parallel
+- **Docker / Laravel Sail / WSL** through the new `command` setting (no shell, paths relative to the project root)
+- Settings: `projectRoot`, `command`, `additionalArgs`, `env`, `disableXdebug`, `testFileGlob`
+- "Pest" output channel logging the command, working directory and timings of each run
+
+#### Fixed
+
+- Runs failed when VS Code was opened on a parent folder of the project, even with `pestBinaryPath` set: Pest now runs from the project root
+- Status icons stuck on "Running": top-level `it()` tests, datasets and tests sharing a name in different `describe` blocks never matched their result
+- "Run Suite" wrote every result into the active file
+- Tests that never report a result (fatal error, missing binary) are now marked as errored with the reason, instead of running forever
+- Accents and other non-ASCII characters split across output chunks garbled test names
+- `--filter` didn't escape regex characters: names with `(`, `.`, `@`, `#` ran the wrong tests or none
+- `showTerminal` ran every test twice; debug mode passed quoted test names that matched nothing
+- `"C:\\new"` in a test name was decoded as a newline; `||n` in Teamcity output was decoded as a newline
+- Tests after a nested `describe` were left out when running the outer group
+
+#### Performance
+
+- One coalesced UI refresh per 100 ms instead of several per test event
+- Test files are re-parsed 400 ms after typing stops, instead of on every keystroke
+- PHP is started directly instead of through `cmd.exe` / `pest.bat` / bash
+- `XDEBUG_MODE=off` for normal runs
+- Several files run in a single Pest process
+
+#### Removed
+
+- `pestBinaryPath`: use `command` (e.g. `php vendor/bin/pest` or `C:\php\php.exe vendor/bin/pest`)
+- `showTerminal`: output is in the Test Results panel
+- `debugMode`: use the Debug profile
+- `focusOutputOnRun`: the "Pest" output channel only holds diagnostics, open it when needed
+
 ## [0.2.0] - 2025-01-XX
 
 ### 🚀 Major Architecture Upgrade - Real-Time Streaming

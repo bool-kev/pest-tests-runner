@@ -3,110 +3,61 @@
  * Centralized handling of test execution results
  */
 
-export type TestStatus = 'passed' | 'failed' | 'running' | 'skipped' | 'none';
-
-/**
- * Structured test result with all relevant data
- */
-export interface TestResultData {
-    name: string;
-    status: TestStatus;
-    type: 'test' | 'describe';
-
-    // Timing
-    duration?: number;        // Duration in seconds
-    startTime?: number;       // Start timestamp (ms)
-
-    // Error info (for failed tests)
-    errorLine?: number;       // Line number where error occurred
-    errorMessage?: string;    // Short error message
-    errorDetails?: string;    // Full stack trace
-
-    // Skip info
-    skipReason?: string;      // Reason for skipping
-
-    // Hierarchy
-    describeName?: string;    // Parent describe block name
-
-    // Teamcity tracking
-    flowId?: number;
-}
-
-/**
- * Parse test name from Teamcity hierarchical format
- * Input: "`Describe Block` → `Nested` → it should do something"
- * Output: { testName: "should do something", describePath: ["Describe Block", "Nested"] }
- */
-export function parseTeamcityTestName(rawName: string): { testName: string; describePath: string[] } {
-    const describePath: string[] = [];
-    let testName = rawName;
-
-    if (rawName.includes('→')) {
-        const parts = rawName.split('→').map(p => p.trim());
-
-        // All parts except last are describe blocks
-        for (let i = 0; i < parts.length - 1; i++) {
-            // Remove backticks from describe names
-            const describeName = parts[i].replace(/`/g, '').trim();
-            if (describeName) {
-                describePath.push(describeName);
-            }
-        }
-
-        // Last part is the test name
-        const lastPart = parts[parts.length - 1].trim();
-
-        // Remove "it " or "test " prefix if present
-        testName = lastPart
-            .replace(/^it\s+/, '')
-            .replace(/^test\s+/, '')
-            .trim();
-    }
-
-    return { testName, describePath };
-}
+export type TestStatus = 'passed' | 'failed' | 'errored' | 'running' | 'queued' | 'skipped' | 'none';
 
 /**
  * Extract error line number from PHP stack trace
+ *
+ * Pest prints frames relative to the project root ("at tests\Unit\FooTest.php:12"), while
+ * plain PHP errors use absolute paths, possibly from inside a container ("/var/www/html/tests/...").
+ * A frame matches when its path and the test file path share the same trailing segments,
+ * so the frame with the longest common suffix wins (first one on ties).
  */
 export function extractErrorLineFromStackTrace(stackTrace: string, testFilePath: string): number {
     if (!stackTrace || !testFilePath) {
         return 0;
     }
 
-    // Normalize path for comparison
-    const normalizedPath = testFilePath.replace(/\\/g, '/').toLowerCase();
-    const fileName = normalizedPath.split('/').pop() || '';
+    const testSegments = splitPath(testFilePath);
 
     // Common patterns in PHP stack traces
     const patterns = [
-        /([^\s]+\.php):(\d+)/gi,              // file.php:123
-        /([^\s]+\.php)\s+on\s+line\s+(\d+)/gi, // file.php on line 123
-        /at\s+([^\s]+\.php):(\d+)/gi,          // at file.php:123
+        /([^\s'"()]+\.php):(\d+)/gi,             // file.php:123
+        /([^\s'"()]+\.php)\s+on\s+line\s+(\d+)/gi, // file.php on line 123
+        /([^\s'"()]+\.php)\((\d+)\)/gi,          // file.php(123) - PHP exception traces
     ];
 
+    let bestLine = 0;
+    let bestScore = 0;
+
     // Split by Teamcity newline escape and real newlines
-    const lines = stackTrace.split(/\|n|\n/);
-
-    for (const line of lines) {
+    for (const line of stackTrace.split(/\|n|\r?\n/)) {
         for (const pattern of patterns) {
-            pattern.lastIndex = 0; // Reset regex
-            const match = pattern.exec(line);
-            if (match) {
-                const foundPath = match[1].replace(/\\/g, '/').toLowerCase();
-                const lineNumber = parseInt(match[2], 10);
-
-                // Check if this matches our test file
-                if (foundPath.endsWith(fileName) ||
-                    normalizedPath.endsWith(foundPath) ||
-                    foundPath === normalizedPath) {
-                    return lineNumber;
+            pattern.lastIndex = 0;
+            let match: RegExpExecArray | null;
+            while ((match = pattern.exec(line)) !== null) {
+                const score = commonSuffixLength(splitPath(match[1]), testSegments);
+                if (score > bestScore) {
+                    bestScore = score;
+                    bestLine = parseInt(match[2], 10);
                 }
             }
         }
     }
 
-    return 0;
+    return bestLine;
+}
+
+function splitPath(filePath: string): string[] {
+    return filePath.replace(/\\/g, '/').toLowerCase().split('/').filter(Boolean);
+}
+
+function commonSuffixLength(a: string[], b: string[]): number {
+    let count = 0;
+    while (count < a.length && count < b.length && a[a.length - 1 - count] === b[b.length - 1 - count]) {
+        count++;
+    }
+    return count;
 }
 
 /**
@@ -156,8 +107,10 @@ export function getStatusIcon(status: TestStatus): string {
     switch (status) {
         case 'passed': return '✅';
         case 'failed': return '❌';
+        case 'errored': return '❌';
         case 'skipped': return '🟡';
         case 'running': return '⏳';
+        case 'queued': return '⏳';
         default: return '○';
     }
 }

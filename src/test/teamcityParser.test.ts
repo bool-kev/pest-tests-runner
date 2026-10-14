@@ -1,6 +1,6 @@
 import * as assert from 'assert';
-import { parseTeamcityLine, TeamcityEvent } from '../teamcityParser';
-import { formatDuration, parseTeamcityTestName } from '../utils/testResultTypes';
+import { parseTeamcityLine, stripDatasetSuffix, TeamcityEvent } from '../teamcityParser';
+import { formatDuration } from '../utils/testResultTypes';
 
 suite('Teamcity Parser Test Suite', () => {
     
@@ -143,33 +143,78 @@ suite('Teamcity Parser Test Suite', () => {
         });
     });
 
-    suite('parseTeamcityTestName', () => {
-        test('extracts simple test name', () => {
-            const result = parseTeamcityTestName('simple test');
-            assert.strictEqual(result.testName, 'simple test');
-            assert.strictEqual(result.describePath.length, 0);
+    // Lines captured from Pest 3.8 (--teamcity) on Windows
+    suite('real Pest output', () => {
+        test('top-level it() keeps the "it " prefix in the description', () => {
+            const result = parseTeamcityLine("##teamcity[testStarted name='it top level it' locationHint='pest_qn://tests\\Unit\\FormatTest.php::it top level it' flowId='20460']");
+            assert.strictEqual(result?.event, TeamcityEvent.testStarted);
+            assert.strictEqual(result?.file, 'tests\\Unit\\FormatTest.php');
+            assert.strictEqual(result?.description, 'it top level it');
         });
 
-        test('extracts test name from hierarchical format', () => {
-            const result = parseTeamcityTestName('`Describe` → it should work');
-            assert.strictEqual(result.testName, 'should work');
-            assert.deepStrictEqual(result.describePath, ['Describe']);
+        test('nested describes', () => {
+            const result = parseTeamcityLine("##teamcity[testStarted name='`Outer` → `Inner` → it works' locationHint='pest_qn://tests\\Unit\\FormatTest.php::`Outer` → `Inner` → it works' flowId='20460']");
+            assert.strictEqual(result?.description, '`Outer` → `Inner` → it works');
         });
 
-        test('handles it prefix removal', () => {
-            const result = parseTeamcityTestName('`Group` → it does something');
-            assert.strictEqual(result.testName, 'does something');
+        test('description containing "::" is split on the first separator', () => {
+            const result = parseTeamcityLine("##teamcity[testStarted name='Foo::bar() with :: inside' locationHint='pest_qn://tests\\Unit\\FormatTest.php::Foo::bar() with :: inside' flowId='20460']");
+            assert.strictEqual(result?.file, 'tests\\Unit\\FormatTest.php');
+            assert.strictEqual(result?.description, 'Foo::bar() with :: inside');
         });
 
-        test('handles test prefix removal', () => {
-            const result = parseTeamcityTestName('`Group` → test something');
-            assert.strictEqual(result.testName, 'something');
+        test('apostrophes and accents', () => {
+            const result = parseTeamcityLine("##teamcity[testStarted name='nom avec l|'apostrophe et é' locationHint='pest_qn://tests\\Unit\\FormatTest.php::nom avec l|'apostrophe et é' flowId='20460']");
+            assert.strictEqual(result?.name, "nom avec l'apostrophe et é");
+            assert.strictEqual(result?.description, "nom avec l'apostrophe et é");
         });
 
-        test('handles nested describes', () => {
-            const result = parseTeamcityTestName('`Outer` → `Inner` → it works');
-            assert.strictEqual(result.testName, 'works');
-            assert.deepStrictEqual(result.describePath, ['Outer', 'Inner']);
+        test('file-level suite has no description', () => {
+            const result = parseTeamcityLine("##teamcity[testSuiteStarted name='Tests\\Unit\\FormatTest' locationHint='pest_qn://tests\\Unit\\FormatTest.php' flowId='20460']");
+            assert.strictEqual(result?.file, 'tests\\Unit\\FormatTest.php');
+            assert.strictEqual(result?.description, undefined);
+        });
+
+        test('comparison failure carries expected and actual', () => {
+            const result = parseTeamcityLine("##teamcity[testFailed name='fails compare' message='Failed asserting that two arrays are identical.' details='at tests\\Unit\\FormatTest.php:7' type='comparisonFailure' actual='Array &0 |[|n    |'a|' => 1,|n|]' expected='Array &0 |[|n    |'a|' => 2,|n|]' flowId='20460']");
+            assert.strictEqual(result?.type, 'comparisonFailure');
+            assert.strictEqual(result?.expected, "Array &0 [\n    'a' => 2,\n]");
+            assert.strictEqual(result?.actual, "Array &0 [\n    'a' => 1,\n]");
+            assert.strictEqual(result?.details, 'at tests\\Unit\\FormatTest.php:7');
+        });
+
+        test('dataset case', () => {
+            const result = parseTeamcityLine("##teamcity[testStarted name='it has dataset with data set \"(|'two|')\"' locationHint='pest_qn://tests\\Unit\\FormatTest.php::it has dataset with data set \"(|'two|')\"' flowId='20460']");
+            assert.strictEqual(result?.description, 'it has dataset with data set "(\'two\')"');
+            assert.strictEqual(stripDatasetSuffix(result!.description!), 'it has dataset');
+        });
+
+        test('testStdOut output', () => {
+            const result = parseTeamcityLine("##teamcity[testStdOut name='prints' out='hello|n' flowId='1']");
+            assert.strictEqual(result?.event, TeamcityEvent.testStdOut);
+            assert.strictEqual(result?.out, 'hello\n');
+        });
+    });
+
+    suite('unescaping', () => {
+        test('escaped pipe followed by n is not a newline', () => {
+            const result = parseTeamcityLine("##teamcity[testFailed name='test' message='a ||n b']");
+            assert.strictEqual(result?.message, 'a |n b');
+        });
+
+        test('unknown escape is kept', () => {
+            const result = parseTeamcityLine("##teamcity[testFailed name='test' message='a |x b']");
+            assert.strictEqual(result?.message, 'a |x b');
+        });
+    });
+
+    suite('stripDatasetSuffix', () => {
+        test('keeps descriptions without dataset', () => {
+            assert.strictEqual(stripDatasetSuffix('it works'), 'it works');
+        });
+
+        test('strips named dataset', () => {
+            assert.strictEqual(stripDatasetSuffix('it named dataset with data set "dataset "one""'), 'it named dataset');
         });
     });
 

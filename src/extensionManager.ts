@@ -3,7 +3,7 @@ import { PestCodeLensProvider } from './pestCodeLensProvider';
 import { TestResultsManager } from './testResultsManager';
 import { TestDecorationProvider } from './testDecorationProvider';
 import { TestRunner } from './testRunner';
-import { parseTestsFromPhp } from './phpAstParser';
+import { warmupParse } from './utils/astWorker';
 
 export class PestExtensionManager {
     private outputChannel: vscode.OutputChannel;
@@ -44,7 +44,8 @@ export class PestExtensionManager {
 
         this.context.subscriptions.push(
             codeLensDisposable,
-            this.outputChannel
+            this.outputChannel,
+            { dispose: () => this.decorationProvider.dispose() }
         );
 
         // Warm up the PHP parser in the background to reduce first-run latency
@@ -54,13 +55,14 @@ export class PestExtensionManager {
     /**
      * Pre-load the PHP parser to avoid cold start delay on first test run
      * This runs in the background and doesn't block extension activation
+     * Results are cached in the centralized cache for immediate reuse
      */
     private warmupParser(): void {
         // Use setImmediate to not block activation
         setImmediate(() => {
             try {
                 // Parse a minimal PHP snippet to initialize the parser engine
-                parseTestsFromPhp('<?php test("warmup", function() {});');
+                warmupParse('<?php test("warmup", function() {});', '__warmup__');
 
                 // Also warm up with the current active file if it's PHP
                 const editor = vscode.window.activeTextEditor;
@@ -68,7 +70,8 @@ export class PestExtensionManager {
                     const content = editor.document.getText();
                     // Only parse if file is not too large (avoid blocking on huge files)
                     if (content.length < 50000) {
-                        parseTestsFromPhp(content);
+                        const cacheKey = editor.document.uri.toString();
+                        warmupParse(content, cacheKey);
                     }
                 }
             } catch {

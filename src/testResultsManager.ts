@@ -1,6 +1,9 @@
 import * as vscode from 'vscode';
 import { TestResultData, TestStatus, formatDuration, getStatusIcon } from './utils/testResultTypes';
 
+/** Key used for file-level test results */
+export const FILE_RESULT_KEY = '__FILE__';
+
 export interface TestResult {
     name: string;
     status: TestStatus;
@@ -310,7 +313,7 @@ export class TestResultsManager {
 
         // Finalize __FILE__ if needed
         if (includeFile) {
-            const allTests = Array.from(fileResults.values()).filter(r => r.type === 'test' && r.name !== '__FILE__');
+            const allTests = Array.from(fileResults.values()).filter(r => r.type === 'test' && r.name !== FILE_RESULT_KEY);
 
             const hasRunning = allTests.some(t => t.status === 'running');
             const hasFailed = allTests.some(t => t.status === 'failed');
@@ -330,8 +333,8 @@ export class TestResultsManager {
 
             const totalDuration = allTests.reduce((sum, t) => sum + (t.duration || 0), 0);
 
-            fileResults.set('__FILE__', {
-                name: '__FILE__',
+            fileResults.set(FILE_RESULT_KEY, {
+                name: FILE_RESULT_KEY,
                 status: fileStatus,
                 line: 0,
                 type: 'test',

@@ -1,15 +1,17 @@
 /**
- * AST Parser Worker - Runs PHP parsing in a separate context to avoid blocking UI
+ * AST Parser Worker - Centralized PHP parsing with caching
  * 
- * Note: VS Code extensions run in a single Node.js process, so we use
- * a promise-based approach with setImmediate to yield to the event loop
- * for large files, preventing UI freezes.
+ * Provides a single entry point for parsing PHP test files with:
+ * - LRU cache (50 files) to avoid re-parsing
+ * - Version-based cache invalidation for VS Code documents
+ * - Content hash fallback for non-document sources
  */
 
 import { parseTestsFromPhp, ParsedTest } from '../phpAstParser';
+import { LRUCache } from './throttle';
 
-// Cache for parsed files to avoid re-parsing
-const parseCache = new Map<string, { hash: number; result: ParsedTest[] }>();
+// Centralized cache for parsed files - shared across all components
+const parseCache = new LRUCache<string, { hash: number; version?: number; result: ParsedTest[] }>(50);
 
 /**
  * Simple hash function for content comparison
@@ -25,37 +27,53 @@ function hashContent(content: string): number {
 }
 
 /**
- * Parse PHP content asynchronously, yielding to event loop for large files
- * Uses caching to avoid re-parsing unchanged content
+ * Parse PHP content with caching - THE single entry point for all parsing
+ * 
+ * @param content - The PHP file content
+ * @param cacheKey - Unique key for caching (typically document URI)
+ * @param version - Optional document version for faster cache lookup
+ * @returns Array of parsed tests
  */
-export async function parsePhpAsync(content: string, cacheKey?: string): Promise<ParsedTest[]> {
-    const contentHash = hashContent(content);
-
-    // Check cache first
-    if (cacheKey) {
+export function parsePhpCached(content: string, cacheKey: string, version?: number): ParsedTest[] {
+    // Fast path: check by version first (for VS Code documents)
+    if (version !== undefined) {
         const cached = parseCache.get(cacheKey);
-        if (cached && cached.hash === contentHash) {
+        if (cached && cached.version === version) {
             return cached.result;
         }
     }
-
-    // For small files (< 10KB), parse synchronously
-    if (content.length < 10000) {
-        const result = parseTestsFromPhp(content);
-        if (cacheKey) {
-            parseCache.set(cacheKey, { hash: contentHash, result });
+    
+    // Check by content hash (handles external file changes)
+    const contentHash = hashContent(content);
+    const cached = parseCache.get(cacheKey);
+    if (cached && cached.hash === contentHash) {
+        // Update version in cache if provided (for next fast-path lookup)
+        if (version !== undefined && cached.version !== version) {
+            parseCache.set(cacheKey, { ...cached, version });
         }
-        return result;
+        return cached.result;
     }
+    
+    // Cache miss - parse and store
+    const result = parseTestsFromPhp(content);
+    parseCache.set(cacheKey, { hash: contentHash, version, result });
+    return result;
+}
 
-    // For larger files, yield to event loop before parsing
-    return new Promise((resolve) => {
-        setImmediate(() => {
-            const result = parseTestsFromPhp(content);
-            if (cacheKey) {
-                parseCache.set(cacheKey, { hash: contentHash, result });
-            }
-            resolve(result);
-        });
-    });
+/**
+ * Warmup the parser by pre-parsing content
+ * Call this during extension activation for the active file
+ */
+export function warmupParse(content: string, cacheKey: string): void {
+    const contentHash = hashContent(content);
+    
+    // Skip if already cached
+    const cached = parseCache.get(cacheKey);
+    if (cached && cached.hash === contentHash) {
+        return;
+    }
+    
+    // Parse and cache
+    const result = parseTestsFromPhp(content);
+    parseCache.set(cacheKey, { hash: contentHash, result });
 }

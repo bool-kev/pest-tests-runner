@@ -1,13 +1,12 @@
 import * as vscode from 'vscode';
-import { TestResultsManager } from './testResultsManager';
-import { parseTestsFromPhp, decodeTestName, ParsedTest } from './phpAstParser';
-import { LRUCache } from './utils/throttle';
+import { TestResultsManager, FILE_RESULT_KEY } from './testResultsManager';
+import { decodeTestName } from './phpAstParser';
+import { formatDuration } from './utils/testResultTypes';
+import { parsePhpCached } from './utils/astWorker';
 
 export class PestCodeLensProvider implements vscode.CodeLensProvider {
 	private _onDidChangeCodeLenses: vscode.EventEmitter<void> = new vscode.EventEmitter<void>();
 	public readonly onDidChangeCodeLenses: vscode.Event<void> = this._onDidChangeCodeLenses.event;
-	// LRU cache limited to 20 files to prevent memory bloat
-	private cache = new LRUCache<string, { version: number; tests: ParsedTest[] }>(20);
 
 	constructor(private testResultsManager: TestResultsManager) {
 		vscode.workspace.onDidChangeConfiguration(() => this._onDidChangeCodeLenses.fire());
@@ -30,7 +29,7 @@ export class PestCodeLensProvider implements vscode.CodeLensProvider {
 		const text = document.getText();
 
 		// File-level CodeLens with status
-		const fileResult = this.testResultsManager.getTestResult(document.uri.fsPath, '__FILE__');
+		const fileResult = this.testResultsManager.getTestResult(document.uri.fsPath, FILE_RESULT_KEY);
 		const fileTitle = fileResult ? getTitleForStatus(fileResult, 'File') : '$(play) Run File';
 		codeLenses.push(new vscode.CodeLens(new vscode.Range(0, 0, 0, 0), {
 			title: fileTitle,
@@ -38,18 +37,9 @@ export class PestCodeLensProvider implements vscode.CodeLensProvider {
 			arguments: []
 		}));
 
-		// Check cache to avoid re-parsing AST if document hasn't changed
+		// Use centralized cache for AST parsing
 		const cacheKey = document.uri.toString();
-		const cached = this.cache.get(cacheKey);
-		let parsedTests: ParsedTest[];
-
-		if (cached && cached.version === document.version) {
-			parsedTests = cached.tests;
-		} else {
-			// Use AST parser to extract tests and describes
-			parsedTests = parseTestsFromPhp(text);
-			this.cache.set(cacheKey, { version: document.version, tests: parsedTests });
-		}
+		const parsedTests = parsePhpCached(text, cacheKey, document.version);
 
 		for (const parsedTest of parsedTests) {
 			const testName = decodeTestName(parsedTest.name);
@@ -92,15 +82,6 @@ export class PestCodeLensProvider implements vscode.CodeLensProvider {
 
 function getTitleForStatus(result: { status: string; duration?: number; message?: string }, label?: string): string {
 	const defaultLabel = label || 'Run';
-
-	// Format duration: show more precision for very fast tests (< 0.01s)
-	const formatDuration = (duration: number): string => {
-		if (duration < 0.01) {
-			// For very fast tests, show up to 4 decimal places
-			return `${duration.toFixed(4)}s`;
-		}
-		return `${duration.toFixed(2)}s`;
-	};
 
 	switch (result.status) {
 		case 'passed':

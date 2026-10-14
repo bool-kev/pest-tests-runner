@@ -1,5 +1,5 @@
 import * as assert from 'assert';
-import { TestResultsManager, TestResult, ExecutionSummary } from '../testResultsManager';
+import { TestResultsManager, TestResult, ExecutionSummary, FILE_RESULT_KEY } from '../testResultsManager';
 
 suite('TestResultsManager Test Suite', () => {
     let manager: TestResultsManager;
@@ -324,13 +324,13 @@ suite('TestResultsManager Test Suite', () => {
         });
 
         test('finalizes __FILE__ status', () => {
-            manager.setResult('/path/test.php', { name: '__FILE__', status: 'running', type: 'test' });
+            manager.setResult('/path/test.php', { name: FILE_RESULT_KEY, status: 'running', type: 'test' });
             manager.setResult('/path/test.php', { name: 'test1', status: 'passed', type: 'test' });
             manager.setResult('/path/test.php', { name: 'test2', status: 'failed', type: 'test' });
 
             manager.finalizeGroupStatuses('/path/test.php', new Set(), true);
 
-            const result = manager.getTestResult('/path/test.php', '__FILE__');
+            const result = manager.getTestResult('/path/test.php', FILE_RESULT_KEY);
             assert.strictEqual(result?.status, 'failed');
         });
     });

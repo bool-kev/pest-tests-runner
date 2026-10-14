@@ -1,5 +1,7 @@
 import * as vscode from 'vscode';
-import { TestResultsManager } from './testResultsManager';
+import { TestResultsManager, TestResult } from './testResultsManager';
+import { decodeTestName } from './phpAstParser';
+import { parsePhpCached } from './utils/astWorker';
 
 export class TestDecorationProvider {
     private errorLineDecorationType: vscode.TextEditorDecorationType;
@@ -25,81 +27,85 @@ export class TestDecorationProvider {
         const results = this.testResultsManager.getAllResultsForFile(filePath);
 
         if (results.length === 0) {
+            editor.setDecorations(this.errorLineDecorationType, []);
             return;
         }
 
+        // Build a map of test name -> result for quick lookup
+        const resultMap = new Map<string, TestResult>();
+        for (const result of results) {
+            resultMap.set(result.name, result);
+        }
+
+        // Use centralized cache for AST parsing
+        const cacheKey = editor.document.uri.toString();
+        const parsed = parsePhpCached(editor.document.getText(), cacheKey, editor.document.version);
+        const parsedTests = parsed.map(t => ({ name: decodeTestName(t.name), line: t.line }));
+
         const errorLineDecorations: vscode.DecorationOptions[] = [];
-        const text = editor.document.getText();
-        const lines = text.split('\n');
+        const lines = editor.document.getText().split('\n');
 
-        for (let i = 0; i < lines.length; i++) {
-            const line = lines[i];
-            const testMatch = line.match(/^\s*(test|it)\s*\(\s*(['"`])((?:(?!\2).|\\.)*)\2/);
-            const describeMatch = line.match(/^\s*describe\s*\(\s*(['"`])((?:(?!\1).|\\.)*)\1/);
+        for (const test of parsedTests) {
+            const result = resultMap.get(test.name);
+            if (!result || result.status === 'none') {
+                continue;
+            }
 
-            if (testMatch || describeMatch) {
-                const testName = testMatch ? testMatch[3] : describeMatch![2];
-                const result = results.find(r => r.name === testName);
+            const testLineIndex = test.line;
+            const range = new vscode.Range(testLineIndex, lines[testLineIndex]?.length || 0, testLineIndex, lines[testLineIndex]?.length || 0);
 
-                if (result && result.status !== 'none') {
-                    const range = new vscode.Range(i, line.length, i, line.length);
+            // For failed tests, show error message
+            if (result.status === 'failed') {
+                const errorMessage = result.message || 'Test failed';
+                const hasSpecificErrorLine = result.line && result.line > 0 && result.line !== testLineIndex + 1;
 
-                    // For failed tests, show error message at the specific line or on test line if not detected
-                    if (result.status === 'failed') {
-                        const errorMessage = result.message || 'Test failed';
-                        const hasSpecificErrorLine = result.line && result.line > 0 && result.line !== i + 1;
-
-                        if (hasSpecificErrorLine) {
-                            // Show error on the specific line where it occurred
-                            const errorLine = result.line! - 1; // Convert to 0-based index
-                            if (errorLine >= 0 && errorLine < lines.length) {
-                                const errorRange = new vscode.Range(errorLine, lines[errorLine].length, errorLine, lines[errorLine].length);
-                                errorLineDecorations.push({
-                                    range: errorRange,
-                                    renderOptions: {
-                                        after: {
-                                            contentText: ` ⚠️ ${errorMessage}`,
-                                            color: new vscode.ThemeColor('errorForeground'),
-                                            fontStyle: 'italic'
-                                        }
-                                    },
-                                    hoverMessage: result.details ? `**Error:**\n\n${result.message}\n\n**Details:**\n\`\`\`\n${result.details}\n\`\`\`` : `**Error:**\n\n${result.message}`
-                                });
-                            }
-                        } else {
-                            // No specific line detected - show error on test line
-                            errorLineDecorations.push({
-                                range,
-                                renderOptions: {
-                                    after: {
-                                        contentText: ` ⚠️ ${errorMessage}`,
-                                        color: new vscode.ThemeColor('errorForeground'),
-                                        fontStyle: 'italic'
-                                    }
-                                },
-                                hoverMessage: result.details ? `**Error:**\n\n${result.message}\n\n**Details:**\n\`\`\`\n${result.details}\n\`\`\`` : `**Error:**\n\n${result.message}`
-                            });
-                        }
+                if (hasSpecificErrorLine) {
+                    const errorLine = result.line! - 1;
+                    if (errorLine >= 0 && errorLine < lines.length) {
+                        const errorRange = new vscode.Range(errorLine, lines[errorLine].length, errorLine, lines[errorLine].length);
+                        errorLineDecorations.push(this.createErrorDecoration(errorRange, errorMessage, result));
                     }
-
-                    // For skipped tests, show skip message
-                    if (result.status === 'skipped' && result.message) {
-                        errorLineDecorations.push({
-                            range,
-                            renderOptions: {
-                                after: {
-                                    contentText: ` 🟡 ${result.message}`,
-                                    color: new vscode.ThemeColor('testing.iconSkipped'),
-                                    fontStyle: 'italic'
-                                }
-                            },
-                            hoverMessage: `**Skipped:**\n\n${result.message}`
-                        });
-                    }
+                } else {
+                    errorLineDecorations.push(this.createErrorDecoration(range, errorMessage, result));
                 }
+            }
+
+            // For skipped tests, show skip message
+            if (result.status === 'skipped' && result.message) {
+                errorLineDecorations.push({
+                    range,
+                    renderOptions: {
+                        after: {
+                            contentText: ` 🟡 ${result.message}`,
+                            color: new vscode.ThemeColor('testing.iconSkipped'),
+                            fontStyle: 'italic'
+                        }
+                    },
+                    hoverMessage: `**Skipped:**\n\n${result.message}`
+                });
             }
         }
 
         editor.setDecorations(this.errorLineDecorationType, errorLineDecorations);
+    }
+
+    private createErrorDecoration(range: vscode.Range, message: string, result: TestResult): vscode.DecorationOptions {
+        return {
+            range,
+            renderOptions: {
+                after: {
+                    contentText: ` ⚠️ ${message}`,
+                    color: new vscode.ThemeColor('errorForeground'),
+                    fontStyle: 'italic'
+                }
+            },
+            hoverMessage: result.details 
+                ? `**Error:**\n\n${result.message}\n\n**Details:**\n\`\`\`\n${result.details}\n\`\`\`` 
+                : `**Error:**\n\n${result.message}`
+        };
+    }
+
+    public dispose() {
+        this.errorLineDecorationType.dispose();
     }
 }

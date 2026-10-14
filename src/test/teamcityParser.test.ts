@@ -1,8 +1,9 @@
 import * as assert from 'assert';
 import { parseTeamcityLine, TeamcityEvent } from '../teamcityParser';
+import { formatDuration, parseTeamcityTestName } from '../utils/testResultTypes';
 
 suite('Teamcity Parser Test Suite', () => {
-
+    
     suite('parseTeamcityLine', () => {
         test('parses testStarted event', () => {
             const line = "##teamcity[testStarted name='example test' flowId='123']";
@@ -139,6 +140,63 @@ suite('Teamcity Parser Test Suite', () => {
             assert.strictEqual(result?.details, 'stack');
             assert.strictEqual(result?.flowId, 99);
             assert.strictEqual(result?.duration, 100);
+        });
+    });
+
+    suite('parseTeamcityTestName', () => {
+        test('extracts simple test name', () => {
+            const result = parseTeamcityTestName('simple test');
+            assert.strictEqual(result.testName, 'simple test');
+            assert.strictEqual(result.describePath.length, 0);
+        });
+
+        test('extracts test name from hierarchical format', () => {
+            const result = parseTeamcityTestName('`Describe` → it should work');
+            assert.strictEqual(result.testName, 'should work');
+            assert.deepStrictEqual(result.describePath, ['Describe']);
+        });
+
+        test('handles it prefix removal', () => {
+            const result = parseTeamcityTestName('`Group` → it does something');
+            assert.strictEqual(result.testName, 'does something');
+        });
+
+        test('handles test prefix removal', () => {
+            const result = parseTeamcityTestName('`Group` → test something');
+            assert.strictEqual(result.testName, 'something');
+        });
+
+        test('handles nested describes', () => {
+            const result = parseTeamcityTestName('`Outer` → `Inner` → it works');
+            assert.strictEqual(result.testName, 'works');
+            assert.deepStrictEqual(result.describePath, ['Outer', 'Inner']);
+        });
+    });
+
+    suite('formatDuration', () => {
+        test('formats very small durations (milliseconds)', () => {
+            const result = formatDuration(0.0005); // 0.5ms
+            assert.strictEqual(result, '0.50ms');
+        });
+
+        test('formats sub-second durations', () => {
+            const result = formatDuration(0.250); // 250ms
+            assert.strictEqual(result, '0.250s');
+        });
+
+        test('formats seconds', () => {
+            const result = formatDuration(1.5); // 1.5s
+            assert.strictEqual(result, '1.50s');
+        });
+
+        test('formats large durations', () => {
+            const result = formatDuration(5); // 5s
+            assert.strictEqual(result, '5.00s');
+        });
+
+        test('formats minutes', () => {
+            const result = formatDuration(90); // 90s = 1m 30s
+            assert.strictEqual(result, '1m 30.0s');
         });
     });
 });

@@ -2,13 +2,13 @@ import * as vscode from 'vscode';
 import { spawn } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
-import { TestResultsManager } from './testResultsManager';
+import { TestResultsManager, FILE_RESULT_KEY } from './testResultsManager';
 import { PestCodeLensProvider } from './pestCodeLensProvider';
 import { TestDecorationProvider } from './testDecorationProvider';
 import { parseTeamcityLine, TeamcityResult, TeamcityEvent } from './teamcityParser';
 import { decodeTestName as astDecodeTestName } from './phpAstParser';
 import { throttle } from './utils/throttle';
-import { parsePhpAsync } from './utils/astWorker';
+import { parsePhpCached } from './utils/astWorker';
 import {
     parseTeamcityTestName,
     extractErrorLineFromStackTrace,
@@ -48,11 +48,11 @@ export class TestRunner {
         }, UI_UPDATE_THROTTLE_MS);
     }
 
-    public async runTest(testName: string, line: number) {
+    public async runTest(testName: string, _line?: number) {
         await this.executeTestCommand(testName, false, false, 'test');
     }
 
-    public async runDescribeGroup(groupName: string, line: number) {
+    public async runDescribeGroup(groupName: string, _line?: number) {
         await this.executeTestCommand(groupName, false, false, 'describe');
     }
 
@@ -168,11 +168,10 @@ export class TestRunner {
         this.testResultsManager.startBatch();
         try {
             if (testName && type === 'test') {
-                // Single test execution - status will be logged when testStarted event is received
+                // Single test execution
                 this.testResultsManager.setTestResult(filePath, testName, 'running', 0, type);
             } else if (testName && type === 'describe') {
                 // Describe group execution - set all tests in group to running
-                this.logResult(`Running group "${testName}"...`, 'running');
                 this.testResultsManager.setTestResult(filePath, testName, 'running', 0, type);
 
                 const testsInGroup = await this.extractTestNamesFromDescribeAsync(filePath, testName);
@@ -181,14 +180,14 @@ export class TestRunner {
                 }
             } else if (runFile) {
                 // File execution - set file-level status and all tests to running
-                this.testResultsManager.setTestResult(filePath, '__FILE__', 'running', 0, 'test');
+                this.testResultsManager.setTestResult(filePath, FILE_RESULT_KEY, 'running', 0, 'test');
                 const testsInFile = await this.extractTestNamesFromFileAsync(filePath);
                 for (const individualTest of testsInFile) {
                     this.testResultsManager.setTestResult(filePath, individualTest, 'running', 0, 'test');
                 }
             } else if (runSuite) {
                 // Suite execution - set file-level status to running
-                this.testResultsManager.setTestResult(filePath, '__FILE__', 'running', 0, 'test');
+                this.testResultsManager.setTestResult(filePath, FILE_RESULT_KEY, 'running', 0, 'test');
             }
         } finally {
             this.testResultsManager.endBatch();
@@ -450,24 +449,19 @@ export class TestRunner {
         testName: string,
         type: 'test' | 'describe' | 'file' | 'suite'
     ): Promise<void> {
-        // The debugger needs the actual PHP script, not a .bat wrapper
-        let pestPhpPath: string;
-
-        if (pestBinary.endsWith('.bat')) {
-            // Windows .bat wrapper - use the PHP script instead (remove .bat)
-            pestPhpPath = path.join(workspaceFolder.uri.fsPath, 'vendor', 'bin', 'pest');
-        } else {
-            // Already a PHP script path - resolve to absolute
-            pestPhpPath = path.isAbsolute(pestBinary)
-                ? pestBinary
-                : path.join(workspaceFolder.uri.fsPath, pestBinary.replace(/^\.[\\/]/, ''));
-        }
+        // Find the Pest PHP script (not the .bat wrapper)
+        let pestPhpPath = path.join(workspaceFolder.uri.fsPath, 'vendor', 'pestphp', 'pest', 'bin', 'pest');
 
         if (!fs.existsSync(pestPhpPath)) {
-            vscode.window.showErrorMessage(
-                `Could not find Pest binary for debugging at: ${pestPhpPath}. Check your "pest-tests-runner.pestBinaryPath" setting.`
-            );
-            return;
+            const vendorBinPest = path.join(workspaceFolder.uri.fsPath, 'vendor', 'bin', 'pest');
+            if (fs.existsSync(vendorBinPest) && !vendorBinPest.endsWith('.bat')) {
+                pestPhpPath = vendorBinPest;
+            } else {
+                vscode.window.showErrorMessage(
+                    'Could not find Pest binary for debugging. Please ensure "vendor/pestphp/pest/bin/pest" exists.'
+                );
+                return;
+            }
         }
 
         const debugConfig: vscode.DebugConfiguration = {
@@ -519,44 +513,13 @@ export class TestRunner {
     }
 
     /**
-     * Async version of extractTestNamesFromFile - uses non-blocking file read and async AST parser
+     * Extract test names from parsed tests (shared logic for sync/async)
      */
-    private async extractTestNamesFromFileAsync(filePath: string): Promise<string[]> {
+    private extractTestNamesFromParsedTests(parsedTests: { name: string; line: number; type: string }[], describeName?: string): string[] {
         const testNames: string[] = [];
 
-        try {
-            const content = await fs.promises.readFile(filePath, 'utf-8');
-
-            // Use async AST parser to avoid blocking UI for large files
-            const parsedTests = await parsePhpAsync(content, filePath);
-
-            for (const test of parsedTests) {
-                // Only include test() and it(), not describe()
-                if (test.type === 'test' || test.type === 'it') {
-                    const decodedName = astDecodeTestName(test.name);
-                    testNames.push(decodedName);
-                }
-            }
-        } catch (error) {
-            this.log(`Error reading file: ${error}`);
-        }
-
-        return testNames;
-    }
-
-    /**
-     * Async version of extractTestNamesFromDescribe - uses non-blocking file read and async AST parser
-     */
-    private async extractTestNamesFromDescribeAsync(filePath: string, describeName: string): Promise<string[]> {
-        const testNames: string[] = [];
-
-        try {
-            const content = await fs.promises.readFile(filePath, 'utf-8');
-
-            // Use async AST parser to avoid blocking UI
-            const parsedTests = await parsePhpAsync(content, filePath);
-
-            // Find the describe block with matching name
+        if (describeName) {
+            // Find describe block boundaries
             let describeLineNumber = -1;
             let nextDescribeLineNumber = Number.MAX_SAFE_INTEGER;
 
@@ -564,32 +527,58 @@ export class TestRunner {
                 if (test.type === 'describe') {
                     const decodedName = astDecodeTestName(test.name);
                     if (decodedName === describeName && describeLineNumber === -1) {
-                        // Found our target describe
                         describeLineNumber = test.line;
                     } else if (describeLineNumber !== -1 && test.line > describeLineNumber) {
-                        // Found next describe after our target - this is the boundary
                         nextDescribeLineNumber = test.line;
                         break;
                     }
                 }
             }
 
-            // If we found the describe, extract all tests between it and the next describe
+            // Extract tests within describe block
             if (describeLineNumber !== -1) {
                 for (const test of parsedTests) {
                     if ((test.type === 'test' || test.type === 'it') &&
                         test.line > describeLineNumber &&
                         test.line < nextDescribeLineNumber) {
-                        const decodedName = astDecodeTestName(test.name);
-                        testNames.push(decodedName);
+                        testNames.push(astDecodeTestName(test.name));
                     }
                 }
             }
-        } catch (error) {
-            this.log(`Error reading file: ${error}`);
+        } else {
+            // Extract all tests
+            for (const test of parsedTests) {
+                if (test.type === 'test' || test.type === 'it') {
+                    testNames.push(astDecodeTestName(test.name));
+                }
+            }
         }
 
         return testNames;
     }
 
+    /**
+     * Extract test names from file - uses async file read but sync parsing (cached)
+     */
+    private async extractTestNamesFromFileAsync(filePath: string): Promise<string[]> {
+        try {
+            const content = await fs.promises.readFile(filePath, 'utf-8');
+            const parsedTests = parsePhpCached(content, filePath);
+            return this.extractTestNamesFromParsedTests(parsedTests);
+        } catch (error) {
+            this.log(`Error reading file: ${error}`);
+            return [];
+        }
+    }
+
+    private async extractTestNamesFromDescribeAsync(filePath: string, describeName: string): Promise<string[]> {
+        try {
+            const content = await fs.promises.readFile(filePath, 'utf-8');
+            const parsedTests = parsePhpCached(content, filePath);
+            return this.extractTestNamesFromParsedTests(parsedTests, describeName);
+        } catch (error) {
+            this.log(`Error reading file: ${error}`);
+            return [];
+        }
+    }
 }

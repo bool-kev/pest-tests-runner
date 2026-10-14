@@ -37,7 +37,7 @@ suite('Extension Test Suite', () => {
 		assert.ok(config);
 
 		// Test default values or that get works
-		const showTerminal = config.get('showTerminal');
-		assert.ok(showTerminal === undefined || typeof showTerminal === 'boolean');
+		const enableCodeLens = config.get('enableCodeLens');
+		assert.ok(enableCodeLens === undefined || typeof enableCodeLens === 'boolean');
 	});
 });

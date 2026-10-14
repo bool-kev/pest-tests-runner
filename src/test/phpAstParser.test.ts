@@ -221,5 +221,92 @@ test('line 3', function () {});`;
         test('returns unchanged string without escapes', () => {
             assert.strictEqual(decodeTestName('simple name'), 'simple name');
         });
+
+        test('does not turn an escaped backslash followed by n into a newline', () => {
+            assert.strictEqual(decodeTestName('C:\\\\new'), 'C:\\new');
+        });
+    });
+
+    suite('Pest identity (pestId, parents)', () => {
+        const code = `<?php
+it('top level it', fn () => 1);
+test('top level test', fn () => 1);
+describe('Outer', function () {
+    it('works', fn () => 1);
+    test('test inside', fn () => 1);
+    describe('Inner', function () {
+        it('works', fn () => 1);
+    });
+    it('after inner', fn () => 1);
+});
+it('has dataset', fn ($v) => 1)
+    ->with([1, 2]);
+test('later', fn () => 1)->todo();
+`;
+        const tests = parseTestsFromPhp(code);
+        const byId = new Map(tests.map(t => [t.pestId, t]));
+
+        test('it() gets the "it " prefix like in Pest output', () => {
+            assert.ok(byId.has('it top level it'));
+            assert.ok(byId.has('top level test'));
+        });
+
+        test('describe chain uses backticks and arrows', () => {
+            assert.ok(byId.has('`Outer`'));
+            assert.ok(byId.has('`Outer` → it works'));
+            assert.ok(byId.has('`Outer` → test inside'));
+            assert.ok(byId.has('`Outer` → `Inner`'));
+            assert.ok(byId.has('`Outer` → `Inner` → it works'));
+        });
+
+        test('tests after a nested describe still belong to the outer one', () => {
+            const after = byId.get('`Outer` → it after inner');
+            assert.deepStrictEqual(after?.parents, ['Outer']);
+        });
+
+        test('same name in two describes gives two distinct ids', () => {
+            assert.strictEqual(tests.filter(t => t.name === 'works').length, 2);
+            assert.strictEqual(new Set(tests.map(t => t.pestId)).size, tests.length);
+        });
+
+        test('chained modifiers and multi-line end', () => {
+            const dataset = byId.get('it has dataset');
+            assert.deepStrictEqual(dataset?.modifiers, ['with']);
+            assert.strictEqual(dataset?.line, 11);
+            assert.strictEqual(dataset?.endLine, 12);
+            assert.deepStrictEqual(byId.get('later')?.modifiers, ['todo']);
+        });
+
+        test('describe range covers its body', () => {
+            const outer = byId.get('`Outer`');
+            assert.strictEqual(outer?.line, 3);
+            assert.strictEqual(outer?.endLine, 10);
+        });
+    });
+
+    suite('PHP string semantics', () => {
+        test('single-quoted: only \\\' and \\\\ are escapes', () => {
+            const tests = parseTestsFromPhp(String.raw`<?php test('it\'s a \\ path \n', fn () => 1);`);
+            assert.strictEqual(tests[0].name, "it's a \\ path \\n");
+        });
+
+        test('double-quoted escapes', () => {
+            const tests = parseTestsFromPhp(String.raw`<?php test("C:\\new \"q\" \$x", fn () => 1);`);
+            assert.strictEqual(tests[0].name, 'C:\\new "q" $x');
+        });
+
+        test('interpolated strings are skipped (name unknown statically)', () => {
+            const tests = parseTestsFromPhp('<?php test("value $x", fn () => 1); test(\'static\', fn () => 1);');
+            assert.deepStrictEqual(tests.map(t => t.name), ['static']);
+        });
+
+        test('accents are preserved', () => {
+            const tests = parseTestsFromPhp(`<?php test("nom avec l'apostrophe é", fn () => 1);`);
+            assert.strictEqual(tests[0].name, "nom avec l'apostrophe é");
+        });
+
+        test('files without test calls are not parsed', () => {
+            assert.deepStrictEqual(parseTestsFromPhp('<?php class Foo { public function bar() {} }'), []);
+        });
     });
 });

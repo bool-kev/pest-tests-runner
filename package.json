@@ -1,8 +1,8 @@
 {
   "name": "pest-tests-runner",
   "displayName": "Pest Tests Runner",
-  "description": "Elegant Pest PHP testing framework runner with real-time streaming, inline status indicators, CodeLens actions, and instant visual feedback directly in your editor",
-  "version": "0.4.6",
+  "description": "Run Pest PHP tests from the Test Explorer, gutter and CodeLens with real-time streaming, diff view for failures, and Docker / Sail / WSL / monorepo support",
+  "version": "0.5.0",
   "publisher": "dark-shadow",
   "author": {
     "name": "dark SHADOW",
@@ -30,19 +30,30 @@
     "laravel",
     "phpunit",
     "codelens",
-    "tdd"
+    "tdd",
+    "test explorer",
+    "docker",
+    "sail",
+    "wsl",
+    "monorepo"
   ],
   "icon": "icon.png",
   "activationEvents": [
-    "onLanguage:php"
+    "onLanguage:php",
+    "workspaceContains:**/tests/Pest.php"
   ],
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
       {
         "command": "pest-tests-runner.runTest",
-        "title": "Pest Tests Runner: Run Test",
+        "title": "Pest Tests Runner: Run Test at Cursor",
         "icon": "$(play)"
+      },
+      {
+        "command": "pest-tests-runner.debugTest",
+        "title": "Pest Tests Runner: Debug Test at Cursor",
+        "icon": "$(debug-alt)"
       },
       {
         "command": "pest-tests-runner.runTestFile",
@@ -63,35 +74,57 @@
     "configuration": {
       "title": "Pest Tests Runner",
       "properties": {
+        "pest-tests-runner.projectRoot": {
+          "type": "string",
+          "default": "",
+          "scope": "resource",
+          "markdownDescription": "Folder of the Pest project (where `vendor/` and `phpunit.xml` live). Leave empty to detect it from each test file, which supports opening a parent folder or a monorepo. Relative paths and `${workspaceFolder}` are resolved against the workspace folder."
+        },
+        "pest-tests-runner.command": {
+          "type": "string",
+          "default": "",
+          "scope": "resource",
+          "markdownDescription": "Command used to start Pest, run from the project root, without a shell. Leave empty to use `php vendor/pestphp/pest/bin/pest`. To use a specific PHP, give only its path (e.g. `C:\\laragon\\bin\\php\\php-8.3\\php.exe`): the Pest script of the project is added automatically. Docker / WSL / Sail: give the full command, e.g. `docker compose exec -T laravel.test php vendor/bin/pest`, `wsl php vendor/bin/pest`, `./vendor/bin/sail pest`. Variables: `${projectRoot}`, `${workspaceFolder}`."
+        },
+        "pest-tests-runner.additionalArgs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "scope": "resource",
+          "markdownDescription": "Extra arguments passed to Pest on every run, e.g. `[\"--parallel\"]` or `[\"--stop-on-failure\"]`."
+        },
+        "pest-tests-runner.env": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "scope": "resource",
+          "markdownDescription": "Extra environment variables for the Pest process, e.g. `{ \"DB_CONNECTION\": \"sqlite\" }`."
+        },
+        "pest-tests-runner.disableXdebug": {
+          "type": "boolean",
+          "default": true,
+          "scope": "resource",
+          "markdownDescription": "Set `XDEBUG_MODE=off` for normal runs when PHP runs locally (Xdebug slows every test down). The Debug profile always enables Xdebug."
+        },
+        "pest-tests-runner.testFileGlob": {
+          "type": "string",
+          "default": "{**/tests/**/*.php,**/Tests/**/*.php,**/*Test.php}",
+          "scope": "window",
+          "markdownDescription": "Glob of the files scanned for Pest tests (`vendor` and `node_modules` are always ignored)."
+        },
         "pest-tests-runner.enableCodeLens": {
           "type": "boolean",
           "default": true,
-          "description": "Enable CodeLens for Pest tests with status indicators"
-        },
-        "pest-tests-runner.pestBinaryPath": {
-          "type": "string",
-          "default": "",
-          "description": "Custom path to Pest binary (leave empty for auto-detection). Example: './vendor/bin/pest' or 'php vendor/pestphp/pest/bin/pest'"
-        },
-        "pest-tests-runner.showTerminal": {
-          "type": "boolean",
-          "default": false,
-          "description": "Show terminal when running tests (default: false, results are shown in Output channel)"
-        },
-        "pest-tests-runner.focusOutputOnRun": {
-          "type": "boolean",
-          "default": true,
-          "description": "Automatically focus the Output channel when running tests"
-        },
-        "pest-tests-runner.debugMode": {
-          "type": "boolean",
-          "default": false,
-          "description": "Run tests with Xdebug debugger attached (requires PHP Debug extension and Xdebug)"
+          "description": "Show Run/status CodeLens above tests, describe blocks and files (the Test Explorer and gutter icons are always available)."
         },
         "pest-tests-runner.autoSaveBeforeRun": {
           "type": "boolean",
           "default": true,
-          "description": "Automatically save the current file before running tests"
+          "description": "Save the test files of a run before starting it."
         }
       }
     }
